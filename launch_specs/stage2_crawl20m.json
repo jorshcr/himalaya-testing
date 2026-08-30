@@ -13,7 +13,8 @@
       "repo_id": "iteratehack/himalaya-stage2-checkpoints",
       "run_id": "stage2-200m-humoslope-locomotion-seed2051-r1",
       "checkpoint_steps": 100663296,
-      "checkpoint_sha256": "fbad689c35d0e101f795a7dcb4b714397c72b6e718dd065fc7b9e46eef7a271f"
+      "checkpoint_sha256": "fbad689c35d0e101f795a7dcb4b714397c72b6e718dd065fc7b9e46eef7a271f",
+      "artifact_sha256": "36cee4dcc815c861483f442756ab8d866abef4995f28ea693850941df06c3427"
     },
     "candidates": [
       {
@@ -22,7 +23,8 @@
         "repo_id": "iteratehack/himalaya-stage2-checkpoints",
         "run_id": "stage2-200m-humoslope-locomotion-seed2051-r1",
         "checkpoint_steps": 100663296,
-        "checkpoint_sha256": "fbad689c35d0e101f795a7dcb4b714397c72b6e718dd065fc7b9e46eef7a271f"
+        "checkpoint_sha256": "fbad689c35d0e101f795a7dcb4b714397c72b6e718dd065fc7b9e46eef7a271f",
+        "artifact_sha256": "36cee4dcc815c861483f442756ab8d866abef4995f28ea693850941df06c3427"
       },
       {
         "role": "final_checkpoint_candidate",
@@ -31,6 +33,7 @@
         "run_id": "stage2-200m-humoslope-locomotion-seed2051-r1",
         "checkpoint_steps": null,
         "checkpoint_sha256": null,
+        "artifact_sha256": null,
         "resolve_after_job_completion": true
       }
     ]
@@ -60,10 +63,16 @@
       "job_id": "6a94a4db45686a1580c195ac",
       "failure": "The pinned training image does not contain curl, so the CLI-free HTTP download exited 127.",
       "mitigation": "Use the repository-owned scripts/download_checkpoint.py helper built on locked httpx; it provides authenticated retries, ASCII-only output, atomic replacement, and SHA-256 verification without external download executables."
+    },
+    {
+      "run": "r5",
+      "job_id": "6a94a62c45686a1580c195eb",
+      "failure": "The downloader correctly rejected the archive because the launch supplied checkpoint_sha256, the extracted checkpoint content digest, instead of artifact_sha256, the archive file digest.",
+      "mitigation": "Track checkpoint_sha256 and artifact_sha256 as distinct provenance fields. Verify downloads against checkpoint.json artifact_sha256 and the matching Hugging Face LFS SHA-256."
     }
   ],
   "launch": {
-    "name": "stage2-200m-crawl20m-timebound-seed2060-r5",
+    "name": "stage2-200m-crawl20m-timebound-seed2060-r6",
     "namespace": "iteratehack",
     "flavor": "h200x4",
     "timeout": "2h",
@@ -77,7 +86,7 @@
     "checkpoint_download": {
       "method": "scripts/download_checkpoint.py",
       "retry_count": 5,
-      "verify_sha256": "fbad689c35d0e101f795a7dcb4b714397c72b6e718dd065fc7b9e46eef7a271f"
+      "verify_sha256": "36cee4dcc815c861483f442756ab8d866abef4995f28ea693850941df06c3427"
     },
     "container_environment": {
       "PYTHONUTF8": "1",

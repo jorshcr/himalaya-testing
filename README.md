@@ -86,6 +86,9 @@ Checkpoint inputs are fetched by the repository-owned
 retries, atomic replacement, and mandatory SHA-256 verification. This avoids
 job-log terminal encoding failures and assumptions about external download
 executables in the pinned image.
+The launch manifest records the extracted checkpoint-content digest separately
+from the compressed artifact digest; downloads are verified against the latter,
+as published in `checkpoint.json` and Hugging Face LFS metadata.
 
 Hip-propulsion, downhill knee-braking, and swing-leg priors are deliberately
 absent because the present objective is stationary balance, not locomotion.

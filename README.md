@@ -23,6 +23,12 @@ Upstream XML is never copied. `himalaya.model` reads the pinned model and
 creates an in-memory overlay containing only the reviewed contact pairs,
 fall-detection proxies, friction values, sensors, and all-fours keyframe.
 
+The reset keyframe separates observed joint position from its load-bearing
+position-actuator target. Its arms place the elbows and palms ahead/outboard
+rather than folding the forearms toward the robot center. On level terrain the
+zero-action reset passes a 20-second native MuJoCo settling gate without
+central-body contact and with less than 1 mm audited hand penetration.
+
 ## Microspike abstraction
 
 Microspikes are represented only by fixed Coulomb sliding friction:
@@ -64,8 +70,10 @@ himalaya render --stage balance-prior --slope 0 `
   --output runs/stage1-0/rollout.mp4
 ```
 
-`audit` writes both a signed-clearance JSON report and a sibling PNG with
-collision proxies and contact forces visible.
+`audit` writes a signed-clearance JSON report plus time-zero and settled PNGs
+with collision proxies and contact forces visible. Positive terrain X is
+explicitly audited as uphill; the heightfield geom carries the signed vertical
+datum rather than misusing MuJoCo's solid-base thickness.
 
 For a cheap wiring test, override both workload controls:
 

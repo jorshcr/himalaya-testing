@@ -26,6 +26,14 @@ def test_anchor_handles_zero_and_nonfinite_forces() -> None:
     assert anchor[0] > 1.99
 
 
+def test_anchor_ignores_inactive_contact_even_with_large_sensor_force() -> None:
+    positions = np.asarray([[0.0, 0.0, 0.0], [100.0, 0.0, 0.0]])
+    anchor = force_weighted_support_anchor(
+        positions, np.asarray([10.0, 10_000.0]), np.asarray([True, False])
+    )
+    np.testing.assert_allclose(anchor, positions[0], atol=1e-12)
+
+
 def test_terrain_zmp_intersects_inclined_plane() -> None:
     slope = math.radians(30.0)
     normal = np.asarray([-math.sin(slope), 0.0, math.cos(slope)])
@@ -55,4 +63,3 @@ def test_stage_two_descriptor_and_com_target() -> None:
         0.3, math.radians(30), maximum_slope_radians=math.radians(30)
     )
     assert target < 0.3
-

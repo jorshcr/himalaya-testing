@@ -72,6 +72,11 @@ def _audit(args) -> int:
     output = Path(args.output)
     write_audit(report, output)
     render_collision_audit(config, output.with_suffix(".png"))
+    render_collision_audit(
+        config,
+        output.with_name(f"{output.stem}-settled.png"),
+        settle_seconds=args.settle_seconds,
+    )
     print(json.dumps(report.__dict__, indent=2, default=list))
     return 0 if report.passed else 2
 
@@ -229,7 +234,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     audit = sub.add_parser("audit", help="run pre-training model/reset gates")
     common(audit)
-    audit.add_argument("--settle-seconds", type=float, default=0.25)
+    audit.add_argument("--settle-seconds", type=float, default=2.0)
     audit.add_argument("--output", default="runs/audit/audit.json")
     audit.set_defaults(func=_audit)
 

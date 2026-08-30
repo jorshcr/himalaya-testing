@@ -31,6 +31,7 @@ class ContactConfig:
     support_epsilon_n: float = 1.0e-3
     zmp_denominator_epsilon: float = 1.0e-5
     zmp_sigma_m: float = 0.12
+    hand_contact_time_constant_s: float = 0.005
 
 
 @dataclass(frozen=True)
@@ -40,21 +41,30 @@ class ResetConfig:
     yaw_jitter_degrees: float = 3.0
     joint_jitter_rad: float = 0.01
     velocity_jitter: float = 0.02
+    minimum_root_height_m: float = 0.24
+    nominal_com_height_m: float = 0.225
+    com_height_sigma_m: float = 0.04
+    root_height_sigma_m: float = 0.05
 
 
 @dataclass(frozen=True)
 class RewardConfig:
-    alive: float = 1.0
+    alive: float = 0.5
     terrain_zmp: float = 2.0
     orientation: float = 1.0
-    drift: float = -1.0
+    root_height: float = 2.0
+    com_height: float = 1.0
+    drift: float = -4.0
     hand_slip: float = -0.5
     foot_slip: float = -0.5
-    action_rate: float = -0.05
-    energy: float = -5.0e-4
-    termination: float = -100.0
+    action_magnitude: float = -0.02
+    action_rate: float = -0.02
+    pose_deviation: float = -0.2
+    energy: float = -1.0e-4
+    # Upstream multiplies every component by ctrl_dt (0.02).  This scale
+    # therefore produces a fixed -100 terminal cost instead of the old -2.
+    termination: float = -5000.0
     # Stage-II-only soft posture terms.
-    com_height: float = 1.0
     load_balance: float = 0.25
     wrist_moment: float = -0.05
     arm_loading: float = -0.1
@@ -67,6 +77,13 @@ class PPOConfig:
     seed: int = 2026
     checkpoint_interval_steps: int = 25_000_000
     checkpoint_repo: str = "iteratehack/himalaya-stage1-checkpoints"
+    discounting: float = 0.997
+    unroll_length: int = 64
+    batch_size: int = 256
+    num_minibatches: int = 32
+    num_updates_per_batch: int = 4
+    learning_rate: float = 3.0e-4
+    entropy_cost: float = 0.002
 
 
 @dataclass(frozen=True)
@@ -147,7 +164,6 @@ def to_playground_config(config: ExperimentConfig):
         for name, value in asdict(config.reward).items():
             scales[name] = value
         if config.stage == "balance-prior":
-            scales.com_height = 0.0
             scales.load_balance = 0.0
             scales.wrist_moment = 0.0
             scales.arm_loading = 0.0

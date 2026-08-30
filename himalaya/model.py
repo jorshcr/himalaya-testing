@@ -12,15 +12,32 @@ from .config import ExperimentConfig, MENAGERIE_REVISION
 
 
 ALL_FOURS_QPOS = (
-    # 20 mm solver-clearance margin: all four hfield pairs remain active while
-    # passive 30-degree settling stays outside the hand envelope.
-    0.0, 0.0, 0.3441825880,
+    # Audited forward-hand support pose.  The previous pose folded both arms
+    # behind the shoulders and made the head an unsupported cantilever.
+    0.0, 0.0, 0.3180000000,
     0.7047546641, 0.0, 0.7094511001, 0.0,
     -1.073643179, 0.0, 0.0, 1.327866394, 0.1304456157, 0.0,
     -1.073643179, 0.0, 0.0, 1.327866394, 0.1304456157, 0.0,
     0.0, 0.0, 0.073,
-    -0.7824953771, 0.1553553360, 0.7655998188, 1.811060768, 0.12, 0.1020115576, 0.0,
-    -0.7824953771, -0.1553553360, -0.7655998188, 1.811060768, -0.12, 0.1020115576, 0.0,
+    -0.3133458950, 1.3059744290, 0.3345391130, -0.0773406090,
+    0.2684730470, 0.0625170370, -1.6100000000,
+    -0.3133458950, -1.3059744290, -0.3345391130, -0.0773406090,
+    -0.2684730470, 0.0625170370, 1.6100000000,
+)
+
+# Position-actuator targets are deliberately distinct from the observed reset
+# pose.  They provide the static preload required to carry the robot's weight;
+# treating qpos as ctrl was the main reason the old reset collapsed.
+ALL_FOURS_CTRL = (
+    -1.2306813674, 0.0002833644, 0.0002214790, 0.7234758024,
+    0.1495123556, 0.0007496896,
+    -1.2308270018, 0.0002716737, 0.0000911773, 0.7243249109,
+    0.1492630893, -0.0008690798,
+    -0.0003791447, -0.0000225161, 0.2507063063,
+    -0.4091417065, 1.2692527413, 0.3133063789, -0.0653610824,
+    0.3437745735, 0.0654024026, -1.5590607426,
+    -0.4088444085, -1.2694228453, -0.3134203066, -0.0653856314,
+    -0.3435858548, 0.0654027031, 1.5591411785,
 )
 
 
@@ -77,7 +94,7 @@ def _patch_robot_xml(source: bytes, config: ExperimentConfig) -> bytes:
         "key",
         name=config.reset.keyframe,
         qpos=_numbers(ALL_FOURS_QPOS),
-        ctrl=_numbers(ALL_FOURS_QPOS[7:]),
+        ctrl=_numbers(ALL_FOURS_CTRL),
     )
     return ET.tostring(root, encoding="utf-8")
 
@@ -105,6 +122,7 @@ def build_overlay_bundle(config: ExperimentConfig) -> OverlayBundle:
         ET.SubElement(
             contact, "pair", name=f"{side}_hand_floor",
             geom1=f"{side}_hand_collision", geom2="floor", condim="3",
+            solref=f"{config.contact.hand_contact_time_constant_s:g} 1",
             friction=(
                 f"{config.contact.hand_sliding_friction:g} "
                 f"{config.contact.hand_sliding_friction:g}"
@@ -155,10 +173,13 @@ def configure_slope_heightfield(model, slope_degrees: float) -> None:
         raise ValueError("expected exactly one rough-terrain heightfield")
     rows, cols = int(model.hfield_nrow[0]), int(model.hfield_ncol[0])
     address = int(model.hfield_adr[0])
+    base_thickness = float(model.hfield_size[0, 3])
     count = rows * cols
     source = model.hfield_data[address : address + count].reshape(rows, cols).copy()
     half_x, half_y = model.hfield_size[0, :2]
-    x = np.linspace(half_x, -half_x, cols)
+    # MuJoCo maps increasing heightfield columns to increasing world X.
+    # Keeping this sign explicit makes +X the audited uphill direction.
+    x = np.linspace(-half_x, half_x, cols)
     y = np.linspace(-half_y, half_y, rows)
     xx, yy = np.meshgrid(x, y)
     outside_x = np.clip((np.abs(xx) - 0.75) / 0.25, 0.0, 1.0)
@@ -173,4 +194,13 @@ def configure_slope_heightfield(model, slope_degrees: float) -> None:
     low, height = float(np.min(surface)), float(np.ptp(surface))
     model.hfield_data[address : address + count] = ((surface - low) / height).ravel()
     model.hfield_size[0, 2] = height
-    model.hfield_size[0, 3] = -low
+    # hfield_size[3] is the solid base thickness, not a vertical datum.  Put
+    # negative elevation in the geom transform so the normalized samples map
+    # back to the requested signed surface.
+    model.hfield_size[0, 3] = base_thickness
+    model.geom_pos[model.geom("floor").id, 2] = low
+    # World-body geom transforms are compile-time constants in MuJoCo.  Refresh
+    # them before native stepping or conversion to MJX.
+    import mujoco
+
+    mujoco.mj_setConst(model, mujoco.MjData(model))

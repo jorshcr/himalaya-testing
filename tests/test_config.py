@@ -32,4 +32,4 @@ def test_actor_and_scientific_intent_are_stationary() -> None:
     assert "uphill_progress" not in text
     assert "four_contact_reward" not in text
     assert config.stage == "balance-prior"
-
+    assert config.reward.termination * 0.02 == -100.0

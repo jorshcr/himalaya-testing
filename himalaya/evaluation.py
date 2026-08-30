@@ -46,13 +46,16 @@ def evaluate(
     rng = jax.random.PRNGKey(config.ppo.seed)
     rng, reset_rng = jax.random.split(rng)
     state = reset(jax.random.split(reset_rng, trials))
-    active = np.ones(trials, dtype=bool)
-    failed = np.zeros(trials, dtype=bool)
-    nonfinite = np.zeros(trials, dtype=bool)
-    recovered = np.zeros(trials, dtype=bool)
-    peak_hand = np.zeros(trials)
-    peak_wrist = np.zeros(trials)
-    final_drift = np.zeros(trials)
+    # Keep the rollout state and reductions on device.  The previous version
+    # copied every metric to the host at every step, serializing 1000 GPU
+    # dispatches and making the required 64-trial gate impractically slow.
+    active = jp.ones(trials, dtype=bool)
+    failed = jp.zeros(trials, dtype=bool)
+    nonfinite = jp.zeros(trials, dtype=bool)
+    recovered = jp.zeros(trials, dtype=bool)
+    peak_hand = jp.zeros(trials)
+    peak_wrist = jp.zeros(trials)
+    final_drift = jp.zeros(trials)
     steps = round(config.evaluation.duration_seconds / env.dt)
     push_step = round(config.evaluation.push_time_seconds / env.dt)
     recovery_deadline = push_step + round(config.evaluation.recovery_seconds / env.dt)
@@ -64,18 +67,18 @@ def evaluate(
             state = state.replace(data=state.data.replace(qvel=qvel))
         rng, action_rng = jax.random.split(rng)
         action = act(state.obs, jax.random.split(action_rng, trials))[0]
-        action = jp.where(jp.asarray(active)[:, None], action, jp.zeros_like(action))
+        action = jp.where(active[:, None], action, jp.zeros_like(action))
         state = step(state, action)
-        metrics = {name: np.asarray(value) for name, value in state.metrics.items()}
-        done = np.asarray(state.done) > 0.5
+        metrics = state.metrics
+        done = state.done > 0.5
         prohibited = metrics["validation/prohibited_body_contact"] > 0.5
         bad_number = metrics["validation/nonfinite"] > 0.5
         failed |= active & (done | prohibited)
         nonfinite |= active & bad_number
         active &= ~(done | prohibited | bad_number)
         final_drift = metrics["validation/drift_m"]
-        peak_hand = np.maximum(peak_hand, metrics["validation/peak_hand_force_n"])
-        peak_wrist = np.maximum(peak_wrist, metrics["validation/peak_wrist_moment_nm"])
+        peak_hand = jp.maximum(peak_hand, metrics["validation/peak_hand_force_n"])
+        peak_wrist = jp.maximum(peak_wrist, metrics["validation/peak_wrist_moment_nm"])
         if push_step < index <= recovery_deadline:
             recovered |= active & (
                 (final_drift <= config.evaluation.maximum_drift_m)
@@ -86,6 +89,18 @@ def evaluate(
         & recovered
         & (final_drift <= config.evaluation.maximum_drift_m)
         & ~nonfinite
+    )
+    success, failed, nonfinite, recovered, final_drift, peak_hand, peak_wrist = (
+        np.asarray(value)
+        for value in (
+            success,
+            failed,
+            nonfinite,
+            recovered,
+            final_drift,
+            peak_hand,
+            peak_wrist,
+        )
     )
     rate = float(np.mean(success))
     return EvaluationReport(

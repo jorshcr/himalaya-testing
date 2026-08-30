@@ -26,6 +26,12 @@ class AuditReport:
     maximum_hand_penetration_m: float
     hand_contacts: int
     support_contacts: tuple[str, ...]
+    initial_support_contacts: tuple[str, ...]
+    support_occupancy_maintained: bool
+    minimum_root_height_m: float
+    final_root_height_m: float
+    prohibited_contacts: tuple[str, ...]
+    settling_passed: bool
     nonfinite: bool
     notes: tuple[str, ...]
 
@@ -47,7 +53,7 @@ def _nominal_data(model: mujoco.MjModel, config: ExperimentConfig) -> mujoco.MjD
     return data
 
 
-def audit_model(config: ExperimentConfig, *, settle_seconds: float = 0.25) -> AuditReport:
+def audit_model(config: ExperimentConfig, *, settle_seconds: float = 2.0) -> AuditReport:
     from mujoco_playground._src import mjx_env
     from mujoco_playground._src.locomotion.g1 import base, g1_constants
 
@@ -88,6 +94,30 @@ def audit_model(config: ExperimentConfig, *, settle_seconds: float = 0.25) -> Au
         model.geom("left_foot").id: "left_foot",
         model.geom("right_foot").id: "right_foot",
     }
+
+    def contact_state() -> tuple[set[int], set[str], set[str]]:
+        hand_ids_active: set[int] = set()
+        support_names: set[str] = set()
+        for contact in data.contact:
+            pair = {int(contact.geom1), int(contact.geom2)}
+            if floor_id in pair and bool(pair & hand_ids):
+                hand_ids_active.update(pair & hand_ids)
+            if floor_id in pair:
+                support_names.update(
+                    support_by_id[geom_id]
+                    for geom_id in pair
+                    if geom_id in support_by_id
+                )
+        prohibited = {
+            name
+            for name in ("pelvis", "torso", "head")
+            if data.sensordata[
+                model.sensor_adr[model.sensor(f"himalaya_{name}_floor_found").id]
+            ]
+            > 0
+        }
+        return hand_ids_active, support_names, prohibited
+
     def hand_clearance(geom_id: int) -> float:
         rotation = data.geom_xmat[geom_id].reshape(3, 3)
         size = model.geom_size[geom_id]
@@ -96,21 +126,19 @@ def audit_model(config: ExperimentConfig, *, settle_seconds: float = 0.25) -> Au
 
     minimum_clearance = min(hand_clearance(geom) for geom in hand_ids)
     penetration = max(0.0, -minimum_clearance)
-    hand_contact_ids: set[int] = set()
-    support_contact_names: set[str] = set()
-    for contact in data.contact:
-        pair = {int(contact.geom1), int(contact.geom2)}
-        if floor_id in pair and bool(pair & hand_ids):
-            hand_contact_ids.update(pair & hand_ids)
-        if floor_id in pair:
-            support_contact_names.update(
-                support_by_id[geom_id]
-                for geom_id in pair
-                if geom_id in support_by_id
-            )
-    steps = max(1, round(settle_seconds / model.opt.timestep))
+    hand_contact_ids, initial_support_names, prohibited_names = contact_state()
+    expected_supports = set(support_by_id.values())
+    support_maintained = initial_support_names == expected_supports
+    root_height = float(data.qpos[:3] @ normal)
+    minimum_root_height = root_height
+    steps = max(0, round(settle_seconds / model.opt.timestep))
     for _ in range(steps):
         mujoco.mj_step(model, data)
+        _, current_supports, current_prohibited = contact_state()
+        support_maintained &= current_supports == expected_supports
+        prohibited_names.update(current_prohibited)
+        root_height = float(data.qpos[:3] @ normal)
+        minimum_root_height = min(minimum_root_height, root_height)
         penetration = max(
             penetration,
             max(0.0, -min(hand_clearance(geom) for geom in hand_ids)),
@@ -135,9 +163,17 @@ def audit_model(config: ExperimentConfig, *, settle_seconds: float = 0.25) -> Au
         for side in ("left", "right")
     )
     nonfinite = not bool(np.all(np.isfinite(data.qpos)) and np.all(np.isfinite(data.qvel)))
+    _, settled_support_names, current_prohibited = contact_state()
+    prohibited_names.update(current_prohibited)
+    settling_passed = bool(
+        minimum_root_height >= config.reset.minimum_root_height_m
+        and not prohibited_names
+        and not nonfinite
+    )
     notes = (
         "microspike friction values are uncalibrated simulation assumptions",
-        "passive settling is reset evidence, not learned balance evidence",
+        "settling verifies the reset/controller target; it is not learned balance evidence",
+        "exact four-contact occupancy is diagnostic and is not a survival condition",
     )
     passed = bool(
         upstream_baseline_passed
@@ -147,8 +183,8 @@ def audit_model(config: ExperimentConfig, *, settle_seconds: float = 0.25) -> Au
         and joint_limits_valid
         and penetration <= config.contact.max_hand_penetration_m
         and len(hand_contact_ids) == 2
-        and len(support_contact_names) == 4
-        and not nonfinite
+        and initial_support_names == expected_supports
+        and settling_passed
     )
     return AuditReport(
         passed=passed,
@@ -160,7 +196,13 @@ def audit_model(config: ExperimentConfig, *, settle_seconds: float = 0.25) -> Au
         minimum_hand_clearance_m=minimum_clearance,
         maximum_hand_penetration_m=penetration,
         hand_contacts=len(hand_contact_ids),
-        support_contacts=tuple(sorted(support_contact_names)),
+        support_contacts=tuple(sorted(settled_support_names)),
+        initial_support_contacts=tuple(sorted(initial_support_names)),
+        support_occupancy_maintained=support_maintained,
+        minimum_root_height_m=minimum_root_height,
+        final_root_height_m=root_height,
+        prohibited_contacts=tuple(sorted(prohibited_names)),
+        settling_passed=settling_passed,
         nonfinite=nonfinite,
         notes=notes,
     )
@@ -171,11 +213,15 @@ def write_audit(report: AuditReport, path: Path) -> None:
     path.write_text(json.dumps(asdict(report), indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def render_collision_audit(config: ExperimentConfig, path: Path) -> Path:
-    """Render the exact audited reset with collision proxies and contacts visible."""
+def render_collision_audit(
+    config: ExperimentConfig, path: Path, *, settle_seconds: float = 0.0
+) -> Path:
+    """Render the audited reset, optionally after zero-action settling."""
 
     model = compile_model(config)
     data = _nominal_data(model, config)
+    for _ in range(round(settle_seconds / model.opt.timestep)):
+        mujoco.mj_step(model, data)
     option = mujoco.MjvOption()
     option.geomgroup[3] = True
     option.flags[mujoco.mjtVisFlag.mjVIS_CONTACTPOINT] = True

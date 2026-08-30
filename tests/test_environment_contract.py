@@ -27,3 +27,7 @@ def test_stationary_step_has_no_contact_count_or_progress_rewards(env) -> None:
     assert "uphill_progress" not in reward_metrics
     assert "four_contact" not in reward_metrics
     assert "terrain_zmp" in reward_metrics
+    assert "root_height" in reward_metrics
+    assert "com_height" in reward_metrics
+    assert "action_magnitude" in reward_metrics
+    assert "pose_deviation" in reward_metrics

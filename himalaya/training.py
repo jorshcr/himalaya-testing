@@ -22,6 +22,13 @@ def ppo_config(config: ExperimentConfig, *, timesteps: int | None = None):
     params = locomotion_params.brax_ppo_config("G1JoystickRoughTerrain")
     params.num_timesteps = int(timesteps or config.ppo.timesteps_per_stage)
     params.num_envs = int(config.ppo.num_envs)
+    params.discounting = float(config.ppo.discounting)
+    params.unroll_length = int(config.ppo.unroll_length)
+    params.batch_size = int(config.ppo.batch_size)
+    params.num_minibatches = int(config.ppo.num_minibatches)
+    params.num_updates_per_batch = int(config.ppo.num_updates_per_batch)
+    params.learning_rate = float(config.ppo.learning_rate)
+    params.entropy_cost = float(config.ppo.entropy_cost)
     params.num_evals = (
         math.ceil(params.num_timesteps / config.ppo.checkpoint_interval_steps) + 1
     )
@@ -79,7 +86,11 @@ def train(
         environment=env,
         eval_env=env,
         network_factory=network_factory,
-        wrap_env_fn=wrapper.wrap_for_brax_training,
+        # Finite-difference CoM acceleration lives in info.  Cached-data-only
+        # autoreset leaves that history stale and creates a spurious ZMP spike.
+        wrap_env_fn=functools.partial(
+            wrapper.wrap_for_brax_training, full_reset=True
+        ),
         save_checkpoint_path=str(output / "checkpoints"),
         restore_checkpoint_path=str(restore) if restore else None,
         # HumoSlope Stage II keeps the actor and resets the expanded critic.

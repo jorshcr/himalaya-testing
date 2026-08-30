@@ -10,3 +10,11 @@ def test_30_degree_signed_clearance_and_support_gate() -> None:
     assert set(report.support_contacts) == {
         "left_hand", "right_hand", "left_foot", "right_foot"
     }
+
+
+def test_level_reset_is_load_bearing_for_full_acceptance_horizon() -> None:
+    report = audit_model(default_config(), settle_seconds=20.0)
+    assert report.passed
+    assert report.settling_passed
+    assert report.minimum_root_height_m >= 0.24
+    assert report.prohibited_contacts == ()

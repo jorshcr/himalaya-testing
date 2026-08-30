@@ -18,16 +18,28 @@ def _xp(*values: Any):
 
 
 def force_weighted_support_anchor(
-    positions: Any, normal_forces: Any, *, epsilon: float = 1.0e-3
+    positions: Any,
+    normal_forces: Any,
+    active_contacts: Any | None = None,
+    *,
+    epsilon: float = 1.0e-3,
 ):
-    """Return a smooth interior anchor for any number of support contacts."""
+    """Return the normal-force anchor of active support contacts only."""
 
-    xp = _xp(positions, normal_forces)
+    xp = _xp(positions, normal_forces, active_contacts)
     positions = xp.asarray(positions)
     forces = xp.asarray(normal_forces)
-    finite = xp.isfinite(forces)
-    weights = xp.where(finite, xp.maximum(forces, 0.0), 0.0) + epsilon
-    return xp.sum(positions * weights[:, None], axis=0) / xp.sum(weights)
+    active = (
+        xp.ones_like(forces, dtype=bool)
+        if active_contacts is None
+        else xp.asarray(active_contacts, dtype=bool)
+    )
+    valid = active & xp.isfinite(forces)
+    weights = xp.where(valid, xp.maximum(forces, 0.0) + epsilon, 0.0)
+    total = xp.sum(weights)
+    fallback = xp.mean(positions, axis=0)
+    anchor = xp.sum(positions * weights[:, None], axis=0) / xp.maximum(total, epsilon)
+    return xp.where(total > 0.0, anchor, fallback)
 
 
 def terrain_aligned_zmp(
@@ -93,4 +105,3 @@ def slope_conditioned_com_height(
     uphill = xp.asarray(facing_uphill, dtype=float)
     offset = uphill * uphill_offset + (1.0 - uphill) * downhill_offset
     return nominal_height * xp.cos(xp.abs(slope_radians)) + intensity * offset
-

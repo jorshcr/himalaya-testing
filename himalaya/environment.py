@@ -67,7 +67,10 @@ class FourContactBalanceEnv(upstream_joystick.Joystick):
 
         key = self._mj_model.keyframe(self.experiment.reset.keyframe)
         self._init_q = jp.asarray(key.qpos)
-        self._default_pose = jp.asarray(key.qpos[7:])
+        self._reference_pose = jp.asarray(key.qpos[7:])
+        # Zero policy action means the audited load-bearing preload, not the
+        # observed (gravity-deflected) joint pose.
+        self._default_pose = jp.asarray(key.ctrl)
         self._nominal_root_quat = jp.asarray(key.qpos[3:7])
         self._hand_sensor_ids = np.asarray(
             [self._mj_model.sensor(f"{side}_hand_floor_found").id for side in ("left", "right")]
@@ -120,6 +123,7 @@ class FourContactBalanceEnv(upstream_joystick.Joystick):
                 for axis in ("roll", "pitch", "yaw")
             ]
         )
+        self._joint_ranges = jp.asarray(self._uppers - self._lowers)
 
     def sample_command(self, rng: jax.Array) -> jax.Array:
         del rng
@@ -145,7 +149,7 @@ class FourContactBalanceEnv(upstream_joystick.Joystick):
             maxval=self.experiment.reset.joint_jitter_rad,
         )
         qpos = qpos.at[7:].set(
-            jp.clip(self._default_pose + joint_noise, self._lowers, self._uppers)
+            jp.clip(self._reference_pose + joint_noise, self._lowers, self._uppers)
         )
         limit = math.radians(self.experiment.reset.yaw_jitter_degrees)
         yaw = jax.random.uniform(yaw_rng, (), minval=-limit, maxval=limit)
@@ -164,7 +168,7 @@ class FourContactBalanceEnv(upstream_joystick.Joystick):
             self.mj_model,
             qpos=qpos,
             qvel=qvel,
-            ctrl=qpos[7:],
+            ctrl=self._default_pose,
             impl=self.mjx_model.impl.value,
             naconmax=self._config.naconmax,
             njmax=self._config.njmax,
@@ -221,8 +225,14 @@ class FourContactBalanceEnv(upstream_joystick.Joystick):
         )
 
     def _contact_forces(self, data: mjx.Data) -> tuple[jax.Array, jax.Array]:
-        feet = jp.linalg.norm(self._sensor_vectors(data, "foot_force"), axis=-1)
-        hands = jp.linalg.norm(self._sensor_vectors(data, "hand_force"), axis=-1)
+        def terrain_normal_force(suffix: str, site_ids: jax.Array) -> jax.Array:
+            local_force = self._sensor_vectors(data, suffix)
+            rotation = data.site_xmat[site_ids].reshape((-1, 3, 3))
+            world_force = jp.einsum("nij,nj->ni", rotation, local_force)
+            return jp.abs(world_force @ self._ramp_normal)
+
+        feet = terrain_normal_force("foot_force", self._feet_site_id)
+        hands = terrain_normal_force("hand_force", self._hands_site_id)
         return feet, hands
 
     def _com_position(self, data: mjx.Data) -> jax.Array:
@@ -263,14 +273,20 @@ class FourContactBalanceEnv(upstream_joystick.Joystick):
         first_contact: jax.Array,
         contact: jax.Array,
     ) -> dict[str, jax.Array]:
-        del metrics, first_contact
+        del first_contact, contact
         feet_force, hands_force = self._contact_forces(data)
+        foot_contact = self._foot_contacts(data)
+        hand_contact = self._hand_contacts(data)
         positions = jp.vstack(
             [data.site_xpos[self._feet_site_id], data.site_xpos[self._hands_site_id]]
         )
         forces = jp.hstack([feet_force, hands_force])
+        active_contacts = jp.hstack([foot_contact, hand_contact])
         support = force_weighted_support_anchor(
-            positions, forces, epsilon=self.experiment.contact.support_epsilon_n
+            positions,
+            forces,
+            active_contacts,
+            epsilon=self.experiment.contact.support_epsilon_n,
         )
         com = self._com_position(data)
         com_velocity = (com - info["last_com_position"]) / self.dt
@@ -282,6 +298,7 @@ class FourContactBalanceEnv(upstream_joystick.Joystick):
             self._ramp_normal,
             denominator_epsilon=self.experiment.contact.zmp_denominator_epsilon,
         )
+        metrics["validation/zmp_deviation_m"] = jp.linalg.norm(zmp - support)
         torso_z = data.xmat[self._torso_id].reshape((3, 3))[:, 2]
         orientation_error = jp.sum(jp.square(torso_z - self._ramp_tangent))
         displacement = com - info["start_com_position"]
@@ -296,18 +313,20 @@ class FourContactBalanceEnv(upstream_joystick.Joystick):
         hand_tangent = hand_velocity - (
             hand_velocity @ self._ramp_normal
         )[:, None] * self._ramp_normal
-        hand_contact = self._hand_contacts(data)
         energy = jp.sum(
             jp.abs(data.actuator_force * data.qvel[self._actuator_dof_ids])
         )
         target_height = slope_conditioned_com_height(
-            0.28,
+            self.experiment.reset.nominal_com_height_m,
             self._slope_radians,
             maximum_slope_radians=math.radians(30.0),
             facing_uphill=True,
         )
         height = jp.dot(com, self._ramp_normal)
-        load_share = forces / (jp.sum(forces) + 1.0e-6)
+        masked_forces = jp.where(active_contacts, forces, 0.0)
+        load_share = masked_forces / (jp.sum(masked_forces) + 1.0e-6)
+        root_height = jp.dot(data.qpos[:3], self._ramp_normal)
+        pose_error = (data.qpos[7:] - self._reference_pose) / self._joint_ranges
         wrist_moment = jp.linalg.norm(
             self._sensor_vectors(data, "hand_torque"), axis=-1
         )
@@ -318,15 +337,30 @@ class FourContactBalanceEnv(upstream_joystick.Joystick):
                 zmp, support, sigma=self.experiment.contact.zmp_sigma_m
             ),
             "orientation": jp.exp(-orientation_error / 0.25),
+            "root_height": jp.exp(
+                -jp.square(
+                    (root_height - self._init_q[2])
+                    / self.experiment.reset.root_height_sigma_m
+                )
+            ),
             "drift": drift,
             "hand_slip": jp.sum(
                 jp.linalg.norm(hand_tangent, axis=-1) * hand_contact
             ),
-            "foot_slip": jp.sum(jp.linalg.norm(foot_tangent, axis=-1) * contact),
+            "foot_slip": jp.sum(
+                jp.linalg.norm(foot_tangent, axis=-1) * foot_contact
+            ),
+            "action_magnitude": jp.sum(jp.square(action)),
             "action_rate": jp.sum(jp.square(action - info["last_act"])),
+            "pose_deviation": jp.mean(jp.square(pose_error)),
             "energy": energy,
             "termination": done,
-            "com_height": jp.exp(-jp.square((height - target_height) / 0.05)),
+            "com_height": jp.exp(
+                -jp.square(
+                    (height - target_height)
+                    / self.experiment.reset.com_height_sigma_m
+                )
+            ),
             "load_balance": jp.exp(-jp.var(load_share) / 0.02),
             "wrist_moment": jp.sum(jp.square(wrist_moment / 25.0)),
             "arm_loading": arm_force / 1000.0,
@@ -338,7 +372,12 @@ class FourContactBalanceEnv(upstream_joystick.Joystick):
         root_height = jp.dot(data.qpos[:3], self._ramp_normal)
         forbidden = jp.any(data.sensordata[self._forbidden_sensor_adr] > 0)
         nonfinite = ~jp.all(jp.isfinite(data.qpos)) | ~jp.all(jp.isfinite(data.qvel))
-        return (alignment < 0.25) | (root_height < 0.20) | forbidden | nonfinite
+        return (
+            (alignment < 0.25)
+            | (root_height < self.experiment.reset.minimum_root_height_m)
+            | forbidden
+            | nonfinite
+        )
 
     def _set_diagnostics(self, state: mjx_env.State) -> mjx_env.State:
         data = state.data

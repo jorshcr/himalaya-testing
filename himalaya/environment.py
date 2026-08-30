@@ -197,6 +197,10 @@ class FourContactBalanceEnv(upstream_joystick.Joystick):
             reset_drop_height_m=drop_height,
         )
         obs = self._get_obs(data, state.info, foot_contact)
+        # Brax/JAX scan carries require an invariant metrics pytree.  This
+        # diagnostic is populated by ``_get_reward`` on the first step, so it
+        # must also exist in the reset state.
+        state.metrics["validation/zmp_deviation_m"] = jp.zeros(())
         state = state.replace(
             data=data, obs=obs, reward=jp.zeros(()), done=jp.zeros(())
         )

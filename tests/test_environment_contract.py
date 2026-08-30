@@ -27,7 +27,10 @@ def test_actor_stays_upstream_and_critic_has_reserved_descriptor(env) -> None:
 
 def test_stationary_step_has_no_contact_count_or_progress_rewards(env) -> None:
     state = env.reset(jax.random.PRNGKey(1))
+    reset_metric_keys = set(state.metrics)
     state = env.step(state, jp.zeros(29))
+    assert set(state.metrics) == reset_metric_keys
+    assert "validation/zmp_deviation_m" in state.metrics
     reward_metrics = {name.removeprefix("reward/") for name in state.metrics if name.startswith("reward/")}
     assert "uphill_progress" not in reward_metrics
     assert "four_contact" not in reward_metrics

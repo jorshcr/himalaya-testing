@@ -132,7 +132,9 @@ class FourContactBalanceEnv(upstream_joystick.Joystick):
     def reset(self, rng: jax.Array) -> mjx_env.State:
         # Upstream initializes the exact actor/critic structures and metrics.
         state = super().reset(rng)
-        rng, pos_rng, yaw_rng, joint_rng, vel_rng = jax.random.split(rng, 5)
+        rng, pos_rng, yaw_rng, joint_rng, vel_rng, drop_rng = jax.random.split(
+            rng, 6
+        )
         qpos = self._init_q
         uv = jax.random.uniform(
             pos_rng,
@@ -141,7 +143,16 @@ class FourContactBalanceEnv(upstream_joystick.Joystick):
             maxval=self.experiment.reset.position_jitter_m,
         )
         plane_point = uv[0] * self._ramp_tangent + uv[1] * self._ramp_cross
-        qpos = qpos.at[:3].set(plane_point + self._init_q[2] * self._ramp_normal)
+        drop_height = jax.random.uniform(
+            drop_rng,
+            (),
+            minval=self.experiment.reset.drop_height_min_m,
+            maxval=self.experiment.reset.drop_height_max_m,
+        )
+        qpos = qpos.at[:3].set(
+            plane_point
+            + (self._init_q[2] + drop_height) * self._ramp_normal
+        )
         joint_noise = jax.random.uniform(
             joint_rng,
             (29,),
@@ -183,6 +194,7 @@ class FourContactBalanceEnv(upstream_joystick.Joystick):
             last_com_position=com,
             last_com_velocity=jp.zeros(3),
             start_com_position=com,
+            reset_drop_height_m=drop_height,
         )
         obs = self._get_obs(data, state.info, foot_contact)
         state = state.replace(

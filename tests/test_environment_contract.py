@@ -18,6 +18,11 @@ def test_actor_stays_upstream_and_critic_has_reserved_descriptor(env) -> None:
     assert state.obs["privileged_state"].shape == (233,)
     # Stage I keeps the descriptor ABI but does not expose active terrain cues.
     assert jp.all(state.obs["privileged_state"][216:221] == 0.0)
+    height = jp.dot(state.data.qpos[:3], env._ramp_normal)
+    assert env._init_q[2] <= height <= (
+        env._init_q[2] + env.experiment.reset.drop_height_max_m
+    )
+    assert state.info["reset_drop_height_m"] == height - env._init_q[2]
 
 
 def test_stationary_step_has_no_contact_count_or_progress_rewards(env) -> None:

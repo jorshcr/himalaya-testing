@@ -28,6 +28,9 @@ position-actuator target. Its arms place the elbows and palms ahead/outboard
 rather than folding the forearms toward the robot center. On level terrain the
 zero-action reset passes a 20-second native MuJoCo settling gate without
 central-body contact and with less than 1 mm audited hand penetration.
+Training resets then lift that pose by a uniformly sampled `0.25–0.35 m` along
+the terrain normal (centered at `0.30 m`), so the policy must absorb randomized
+landing impacts before holding balance.
 
 ## Microspike abstraction
 

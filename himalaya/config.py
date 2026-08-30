@@ -41,6 +41,8 @@ class ResetConfig:
     yaw_jitter_degrees: float = 3.0
     joint_jitter_rad: float = 0.01
     velocity_jitter: float = 0.02
+    drop_height_min_m: float = 0.25
+    drop_height_max_m: float = 0.35
     minimum_root_height_m: float = 0.24
     nominal_com_height_m: float = 0.225
     com_height_sigma_m: float = 0.04
@@ -123,6 +125,10 @@ class ExperimentConfig:
             raise ValueError("hand friction must be positive")
         if self.contact.foot_sliding_friction <= 0:
             raise ValueError("foot friction must be positive")
+        if self.reset.drop_height_min_m < 0:
+            raise ValueError("minimum drop height must be non-negative")
+        if self.reset.drop_height_max_m < self.reset.drop_height_min_m:
+            raise ValueError("maximum drop height must be at least the minimum")
         if not 0 < self.evaluation.minimum_success_rate <= 1:
             raise ValueError("minimum success rate must be in (0, 1]")
 

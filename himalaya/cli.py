@@ -53,6 +53,25 @@ def _config(args, *, sensitivity: bool = False) -> ExperimentConfig:
                 velocity_jitter=config.reset.velocity_jitter * randomization_scale,
             ),
         )
+    drop_min = getattr(args, "drop_height_min", None)
+    drop_max = getattr(args, "drop_height_max", None)
+    if drop_min is not None or drop_max is not None:
+        config = replace(
+            config,
+            reset=replace(
+                config.reset,
+                drop_height_min_m=(
+                    config.reset.drop_height_min_m
+                    if drop_min is None
+                    else float(drop_min)
+                ),
+                drop_height_max_m=(
+                    config.reset.drop_height_max_m
+                    if drop_max is None
+                    else float(drop_max)
+                ),
+            ),
+        )
     if sensitivity:
         scale = config.contact.sensitivity_scale
         config = replace(
@@ -231,6 +250,8 @@ def build_parser() -> argparse.ArgumentParser:
         item.add_argument("--implementation", choices=("jax", "warp"), default="jax")
         item.add_argument("--seed", type=int)
         item.add_argument("--reset-randomization-scale", type=float, default=1.0)
+        item.add_argument("--drop-height-min", type=float)
+        item.add_argument("--drop-height-max", type=float)
 
     audit = sub.add_parser("audit", help="run pre-training model/reset gates")
     common(audit)

@@ -66,6 +66,7 @@ class PPOConfig:
     num_envs: int = 8192
     seed: int = 2026
     checkpoint_interval_steps: int = 25_000_000
+    checkpoint_repo: str = "iteratehack/himalaya-stage1-checkpoints"
 
 
 @dataclass(frozen=True)

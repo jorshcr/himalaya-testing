@@ -78,6 +78,7 @@ def _audit(args) -> int:
 def _train(args) -> int:
     config = _config(args)
     output = Path(args.output).resolve()
+    checkpoint_repo = args.hf_checkpoint_repo or config.ppo.checkpoint_repo
     configured_timesteps = int(args.timesteps or config.ppo.timesteps_per_stage)
     completion: Path | None = None
     uploaded_steps: set[int] = set()
@@ -92,7 +93,7 @@ def _train(args) -> int:
         nonlocal completion
         print(f"step={step} reward={float(metrics.get('eval/episode_reward', 0.0)):.4f}", flush=True)
         numeric_step = int(step)
-        if numeric_step > 0 and args.hf_checkpoint_repo and numeric_step not in uploaded_steps:
+        if numeric_step > 0 and checkpoint_repo and numeric_step not in uploaded_steps:
             checkpoint = output / "checkpoints" / str(numeric_step)
             archive = archive_checkpoint(output, checkpoint)
             metadata = archive.with_suffix(".json")
@@ -121,13 +122,13 @@ def _train(args) -> int:
             api.upload_file(
                 path_or_fileobj=archive,
                 path_in_repo=f"{prefix}/checkpoint.tar.gz",
-                repo_id=args.hf_checkpoint_repo,
+                repo_id=checkpoint_repo,
                 commit_message=f"{args.run_id}: checkpoint {numeric_step}",
             )
             api.upload_file(
                 path_or_fileobj=metadata,
                 path_in_repo=f"{prefix}/checkpoint.json",
-                repo_id=args.hf_checkpoint_repo,
+                repo_id=checkpoint_repo,
                 commit_message=f"{args.run_id}: metadata {numeric_step}",
             )
             uploaded_steps.add(numeric_step)

@@ -35,9 +35,23 @@
       }
     ]
   },
-  "status": "authorized_to_launch",
+  "status": "relaunching_after_infrastructure_failure",
+  "launch_lessons": [
+    {
+      "run": "r1",
+      "job_id": "6a94a1b8984507d9db4ed7cc",
+      "failure": "The jobs CLI parsed bash -lc as its own options, so bash received the command text as a filename and exited 127.",
+      "mitigation": "Place an explicit -- argument separator before the image and container command."
+    },
+    {
+      "run": "r2",
+      "job_id": "6a94a28445686a1580c19543",
+      "failure": "The Hugging Face downloader encountered a non-UTF-8 charmap while emitting progress output and exited before training.",
+      "mitigation": "Set PYTHONUTF8=1, LANG=C.UTF-8, LC_ALL=C.UTF-8, and HF_HUB_DISABLE_PROGRESS_BARS=1 before any Hugging Face CLI command."
+    }
+  ],
   "launch": {
-    "name": "stage2-200m-crawl20m-seed2060-r1",
+    "name": "stage2-200m-crawl20m-timebound-seed2060-r3",
     "namespace": "iteratehack",
     "flavor": "h200x4",
     "timeout": "2h",
@@ -47,6 +61,12 @@
     "slope_degrees": 30.0,
     "course_length_m": 20.0,
     "checkpoint_repo": "iteratehack/himalaya-stage2-checkpoints",
-    "checkpoint_interval_steps": 25000000
+    "checkpoint_interval_steps": 25000000,
+    "container_environment": {
+      "PYTHONUTF8": "1",
+      "LANG": "C.UTF-8",
+      "LC_ALL": "C.UTF-8",
+      "HF_HUB_DISABLE_PROGRESS_BARS": "1"
+    }
   }
 }

@@ -76,6 +76,12 @@ penalized both for falling behind the required course fraction and for moving
 slower than `0.20 m/s`, preventing a stable stationary solution from scoring
 well merely by surviving.
 
+GPU launch hygiene is part of the reproducible run specification. Container
+commands must follow the jobs CLI `--` argument separator, and remote Python/HF
+commands run with an explicit UTF-8 locale and disabled progress bars. These
+requirements prevent launcher option capture and locale-dependent downloader
+failures before training begins.
+
 Hip-propulsion, downhill knee-braking, and swing-leg priors are deliberately
 absent because the present objective is stationary balance, not locomotion.
 

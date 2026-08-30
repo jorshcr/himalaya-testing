@@ -32,14 +32,21 @@ Training resets then lift that pose by a uniformly sampled `0.25–0.35 m` along
 the terrain normal (centered at `0.30 m`), so the policy must absorb randomized
 landing impacts before holding balance.
 
+Canonical Stage I is a 200-million-step robust balance prior. Every PPO batch
+is stratified across equivalent 0°, 5°, 10°, 15°, and 30° inclines and varies
+sliding friction, link mass/inertia, joint friction, damping, armature, gravity
+magnitude, sensor noise, timed pushes, and the reset state.
+
 ## Microspike abstraction
 
-Microspikes are represented only by fixed Coulomb sliding friction:
+Microspikes are represented only by nominal Coulomb sliding friction:
 
 - hands: `0.9`
 - feet: `1.0`
 
-These are uncalibrated simulation assumptions. They do not establish physical
+Stage-I dynamics randomization scales each nominal sliding coefficient by
+`0.75–1.20`; torsional and rolling friction remain unchanged. These are
+uncalibrated simulation assumptions. They do not establish physical
 traction, attachment strength, wrist safety, or Sim-to-Real feasibility. A
 separate non-promoting sensitivity evaluation uses 80% of both values.
 

@@ -45,3 +45,12 @@ def test_drop_height_bounds_are_canonical_and_validated() -> None:
                 config.reset, drop_height_min_m=0.35, drop_height_max_m=0.25
             )
         )
+
+
+def test_canonical_stage_one_is_extensive_and_multi_slope() -> None:
+    config = default_config()
+    assert config.ppo.timesteps_per_stage == 200_000_000
+    assert config.domain_randomization.enabled
+    assert config.domain_randomization.slope_degrees == (0.0, 5.0, 10.0, 15.0, 30.0)
+    assert config.domain_randomization.hand_friction_scale_range[0] == 0.75
+    assert config.domain_randomization.push_magnitude_mps[1] == 0.75

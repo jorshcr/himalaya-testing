@@ -50,6 +50,24 @@ class ResetConfig:
 
 
 @dataclass(frozen=True)
+class DomainRandomizationConfig:
+    """Stage-I robustness envelope around the nominal simulation model."""
+
+    enabled: bool = True
+    slope_degrees: tuple[float, ...] = (0.0, 5.0, 10.0, 15.0, 30.0)
+    gravity_scale_range: tuple[float, float] = (0.95, 1.05)
+    hand_friction_scale_range: tuple[float, float] = (0.75, 1.20)
+    foot_friction_scale_range: tuple[float, float] = (0.75, 1.20)
+    link_mass_scale_range: tuple[float, float] = (0.80, 1.20)
+    joint_friction_scale_range: tuple[float, float] = (0.30, 2.50)
+    joint_damping_scale_range: tuple[float, float] = (0.70, 1.30)
+    armature_scale_range: tuple[float, float] = (0.80, 1.20)
+    sensor_noise_level: float = 1.5
+    push_interval_seconds: tuple[float, float] = (2.5, 6.0)
+    push_magnitude_mps: tuple[float, float] = (0.15, 0.75)
+
+
+@dataclass(frozen=True)
 class RewardConfig:
     alive: float = 0.5
     terrain_zmp: float = 2.0
@@ -74,7 +92,7 @@ class RewardConfig:
 
 @dataclass(frozen=True)
 class PPOConfig:
-    timesteps_per_stage: int = 40_000_000
+    timesteps_per_stage: int = 200_000_000
     num_envs: int = 8192
     seed: int = 2026
     checkpoint_interval_steps: int = 25_000_000
@@ -112,6 +130,9 @@ class ExperimentConfig:
     upstream: UpstreamConfig = field(default_factory=UpstreamConfig)
     contact: ContactConfig = field(default_factory=ContactConfig)
     reset: ResetConfig = field(default_factory=ResetConfig)
+    domain_randomization: DomainRandomizationConfig = field(
+        default_factory=DomainRandomizationConfig
+    )
     reward: RewardConfig = field(default_factory=RewardConfig)
     ppo: PPOConfig = field(default_factory=PPOConfig)
     evaluation: EvaluationConfig = field(default_factory=EvaluationConfig)
@@ -129,6 +150,13 @@ class ExperimentConfig:
             raise ValueError("minimum drop height must be non-negative")
         if self.reset.drop_height_max_m < self.reset.drop_height_min_m:
             raise ValueError("maximum drop height must be at least the minimum")
+        if not self.domain_randomization.slope_degrees:
+            raise ValueError("domain randomization requires at least one slope")
+        if any(
+            slope not in self.curriculum_degrees
+            for slope in self.domain_randomization.slope_degrees
+        ):
+            raise ValueError("domain-randomized slopes must use the reviewed curriculum")
         if not 0 < self.evaluation.minimum_success_rate <= 1:
             raise ValueError("minimum success rate must be in (0, 1]")
 
@@ -155,8 +183,16 @@ def to_playground_config(config: ExperimentConfig):
         cfg.episode_length = config.episode_length
         cfg.action_scale = config.action_scale
         cfg.restricted_joint_range = True
-        cfg.noise_config.level = 1.0
-        cfg.push_config.enable = False  # Evaluation injects deterministic pushes.
+        cfg.noise_config.level = config.domain_randomization.sensor_noise_level
+        cfg.push_config.enable = (
+            config.stage == "balance-prior" and config.domain_randomization.enabled
+        )
+        cfg.push_config.interval_range = list(
+            config.domain_randomization.push_interval_seconds
+        )
+        cfg.push_config.magnitude_range = list(
+            config.domain_randomization.push_magnitude_mps
+        )
         cfg.lin_vel_x = [0.0, 0.0]
         cfg.lin_vel_y = [0.0, 0.0]
         cfg.ang_vel_yaw = [0.0, 0.0]

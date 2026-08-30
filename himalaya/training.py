@@ -14,6 +14,7 @@ from mujoco_playground import wrapper
 from mujoco_playground.config import locomotion_params
 
 from .config import ExperimentConfig
+from .domain_randomization import make_domain_randomizer
 from .environment import FourContactBalanceEnv
 from .provenance import checkpoint_digest
 
@@ -82,6 +83,9 @@ def train(
     kwargs: dict[str, Any] = dict(params)
     del kwargs["network_factory"]
     output.mkdir(parents=True, exist_ok=True)
+    randomization_fn = None
+    if config.stage == "balance-prior" and config.domain_randomization.enabled:
+        randomization_fn = make_domain_randomizer(env, config, int(params.num_envs))
     return ppo.train(
         environment=env,
         eval_env=env,
@@ -89,7 +93,9 @@ def train(
         # Finite-difference CoM acceleration lives in info.  Cached-data-only
         # autoreset leaves that history stale and creates a spurious ZMP spike.
         wrap_env_fn=functools.partial(
-            wrapper.wrap_for_brax_training, full_reset=True
+            wrapper.wrap_for_brax_training,
+            full_reset=True,
+            randomization_fn=randomization_fn,
         ),
         save_checkpoint_path=str(output / "checkpoints"),
         restore_checkpoint_path=str(restore) if restore else None,

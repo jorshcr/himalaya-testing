@@ -81,6 +81,9 @@ commands must follow the jobs CLI `--` argument separator, and remote Python/HF
 commands run with an explicit UTF-8 locale and disabled progress bars. These
 requirements prevent launcher option capture and locale-dependent downloader
 failures before training begins.
+Checkpoint inputs are fetched without the HF CLI using authenticated retrying
+HTTP and must match their selected SHA-256 before they are extracted. This
+keeps job-log terminal encodings from affecting artifact retrieval.
 
 Hip-propulsion, downhill knee-braking, and swing-leg priors are deliberately
 absent because the present objective is stationary balance, not locomotion.

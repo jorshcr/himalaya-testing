@@ -162,11 +162,22 @@ def compile_model(config: ExperimentConfig):
     bundle = build_overlay_bundle(config)
     model = mujoco.MjModel.from_xml_string(bundle.scene_xml, assets=bundle.assets)
     model.opt.timestep = 0.002
-    configure_slope_heightfield(model, config.slope_degrees)
+    configure_slope_heightfield(
+        model,
+        config.slope_degrees,
+        length_m=config.locomotion.course_length_m,
+        width_m=config.locomotion.course_width_m,
+    )
     return model
 
 
-def configure_slope_heightfield(model, slope_degrees: float) -> None:
+def configure_slope_heightfield(
+    model,
+    slope_degrees: float,
+    *,
+    length_m: float = 20.0,
+    width_m: float = 3.0,
+) -> None:
     """Encode true grade in z-up heightfield data with a smooth reset patch."""
 
     if model.nhfield != 1:
@@ -176,6 +187,8 @@ def configure_slope_heightfield(model, slope_degrees: float) -> None:
     base_thickness = float(model.hfield_size[0, 3])
     count = rows * cols
     source = model.hfield_data[address : address + count].reshape(rows, cols).copy()
+    model.hfield_size[0, 0] = length_m / 2.0
+    model.hfield_size[0, 1] = width_m / 2.0
     half_x, half_y = model.hfield_size[0, :2]
     # MuJoCo maps increasing heightfield columns to increasing world X.
     # Keeping this sign explicit makes +X the audited uphill direction.

@@ -22,6 +22,11 @@ from .provenance import checkpoint_digest
 def ppo_config(config: ExperimentConfig, *, timesteps: int | None = None):
     params = locomotion_params.brax_ppo_config("G1JoystickRoughTerrain")
     params.num_timesteps = int(timesteps or config.ppo.timesteps_per_stage)
+    params.episode_length = (
+        config.locomotion.episode_length
+        if config.stage == "posture-adapter"
+        else config.episode_length
+    )
     params.num_envs = int(config.ppo.num_envs)
     params.discounting = float(config.ppo.discounting)
     params.unroll_length = int(config.ppo.unroll_length)

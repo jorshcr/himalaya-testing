@@ -74,9 +74,13 @@ class DomainRandomizationConfig:
 class LocomotionConfig:
     """Command and biomechanical priors used only by locomotion Stage II."""
 
-    forward_speed_range_mps: tuple[float, float] = (0.15, 0.60)
+    forward_speed_range_mps: tuple[float, float] = (0.30, 0.80)
     tracking_sigma_mps: float = 0.20
-    progress_normalizer_mps: float = 0.60
+    progress_normalizer_mps: float = 0.80
+    course_length_m: float = 20.0
+    course_width_m: float = 3.0
+    course_margin_m: float = 1.0
+    episode_length: int = 2000
     swing_clearance_m: float = 0.06
     swing_clearance_sigma_m: float = 0.03
     swing_hip_beta0_rad: float = -1.05
@@ -110,22 +114,24 @@ class StageIIRewardConfig:
     """Locomotion adaptation of HumoSlope's descriptor-gated BSGA objective."""
 
     alive: float = 0.5
-    terrain_zmp: float = 1.5
-    tracking_forward_velocity: float = 3.0
-    uphill_progress: float = 1.0
+    terrain_zmp: float = 0.5
+    tracking_forward_velocity: float = 8.0
+    uphill_progress: float = 5.0
+    course_progress: float = 2.0
+    course_completion: float = 10.0
     lateral_velocity: float = -1.0
     yaw_rate: float = -0.25
-    terrain_posture: float = 2.0
-    root_height: float = 1.0
-    slope_com_height: float = 3.0
-    collapsed_com: float = -2.0
-    load_balance: float = 0.5
-    drift: float = -2.0
-    hip_propulsion: float = 0.25
-    swing_hip_guidance: float = 0.25
-    swing_clearance: float = 0.25
-    hand_slip: float = -0.75
-    foot_slip: float = -0.75
+    terrain_posture: float = 0.75
+    root_height: float = 0.5
+    slope_com_height: float = 1.0
+    collapsed_com: float = -1.0
+    load_balance: float = 0.1
+    drift: float = -1.5
+    hip_propulsion: float = 0.5
+    swing_hip_guidance: float = 0.5
+    swing_clearance: float = 0.5
+    hand_slip: float = -0.25
+    foot_slip: float = -0.25
     action_magnitude: float = -0.02
     action_rate: float = -0.03
     pose_deviation: float = -0.1
@@ -227,7 +233,11 @@ def to_playground_config(config: ExperimentConfig):
     cfg = joystick.default_config()
     with cfg.unlocked():
         cfg.impl = config.implementation
-        cfg.episode_length = config.episode_length
+        cfg.episode_length = (
+            config.locomotion.episode_length
+            if config.stage == "posture-adapter"
+            else config.episode_length
+        )
         cfg.action_scale = config.action_scale
         cfg.restricted_joint_range = True
         cfg.noise_config.level = config.domain_randomization.sensor_noise_level

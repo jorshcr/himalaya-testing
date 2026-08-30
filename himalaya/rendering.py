@@ -30,7 +30,12 @@ def render_policy(
     rng, reset_rng = jax.random.split(rng)
     state = reset(reset_rng)
     trajectory = []
-    for _ in range(min(config.episode_length, round(seconds / env.dt))):
+    episode_length = (
+        config.locomotion.episode_length
+        if config.stage == "posture-adapter"
+        else config.episode_length
+    )
+    for _ in range(min(episode_length, round(seconds / env.dt))):
         trajectory.append(state)
         rng, action_rng = jax.random.split(rng)
         state = step(state, act(state.obs, action_rng)[0])
@@ -55,4 +60,3 @@ def render_policy(
             raise RuntimeError("ffmpeg is required for rendering") from exc
     media.write_video(output, frames, fps=1.0 / env.dt / 2, qp=18)
     return output
-

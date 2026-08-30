@@ -48,7 +48,12 @@ class FourContactBalanceEnv(upstream_joystick.Joystick):
         self._mj_model.opt.timestep = self.sim_dt
         self._mj_model.jnt_range[1:] = g1_constants.RESTRICTED_JOINT_RANGE
         self._mj_model.actuator_ctrlrange[:] = g1_constants.RESTRICTED_JOINT_RANGE
-        configure_slope_heightfield(self._mj_model, self.experiment.slope_degrees)
+        configure_slope_heightfield(
+            self._mj_model,
+            self.experiment.slope_degrees,
+            length_m=self.experiment.locomotion.course_length_m,
+            width_m=self.experiment.locomotion.course_width_m,
+        )
         self._mj_model.vis.global_.offwidth = 1920
         self._mj_model.vis.global_.offheight = 1080
         self._mjx_model = mjx.put_model(self._mj_model, impl=cfg.impl)
@@ -160,7 +165,16 @@ class FourContactBalanceEnv(upstream_joystick.Joystick):
             minval=-self.experiment.reset.position_jitter_m,
             maxval=self.experiment.reset.position_jitter_m,
         )
-        plane_point = uv[0] * self._ramp_tangent + uv[1] * self._ramp_cross
+        course_start = (
+            -self.experiment.locomotion.course_length_m / 2.0
+            + self.experiment.locomotion.course_margin_m
+            if self.experiment.stage == "posture-adapter"
+            else 0.0
+        )
+        plane_point = (
+            (course_start + uv[0]) * self._ramp_tangent
+            + uv[1] * self._ramp_cross
+        )
         drop_height = jax.random.uniform(
             drop_rng,
             (),
@@ -232,6 +246,18 @@ class FourContactBalanceEnv(upstream_joystick.Joystick):
         next_state.info["last_com_velocity"] = velocity
         if self.experiment.stage == "balance-prior":
             next_state.info["command"] = jp.zeros(3)
+        else:
+            displacement = com - next_state.info["start_com_position"]
+            progress = jp.dot(displacement, self._ramp_tangent)
+            course_target = (
+                self.experiment.locomotion.course_length_m
+                - 2.0 * self.experiment.locomotion.course_margin_m
+            )
+            next_state.info["command"] = jp.where(
+                progress >= course_target,
+                jp.zeros(3),
+                next_state.info["command"],
+            )
         next_state.info["phase_dt"] = jp.zeros(1)
         return self._set_diagnostics(next_state)
 
@@ -378,6 +404,12 @@ class FourContactBalanceEnv(upstream_joystick.Joystick):
             self._sensor_vectors(data, "hand_torque"), axis=-1
         )
         arm_force = jp.sum(jp.abs(data.actuator_force[self._arm_actuator_ids]))
+        course_target = (
+            self.experiment.locomotion.course_length_m
+            - 2.0 * self.experiment.locomotion.course_margin_m
+        )
+        course_fraction = jp.clip(longitudinal_displacement / course_target, 0.0, 1.0)
+        course_complete = (longitudinal_displacement >= course_target).astype(jp.float32)
         forward_velocity = jp.dot(com_velocity, self._ramp_tangent)
         lateral_velocity = jp.dot(com_velocity, self._ramp_cross)
         foot_swing = 1.0 - foot_contact.astype(jp.float32)
@@ -478,6 +510,8 @@ class FourContactBalanceEnv(upstream_joystick.Joystick):
                 -1.0,
                 1.0,
             ),
+            "course_progress": stage_two_gate * course_fraction,
+            "course_completion": stage_two_gate * course_complete,
             "lateral_velocity": stage_two_gate * jp.square(lateral_velocity),
             "yaw_rate": stage_two_gate
             * jp.square(jp.dot(data.qvel[3:6], self._ramp_normal)),

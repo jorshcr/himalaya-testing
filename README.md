@@ -67,6 +67,11 @@ terrain-relative posture, stance-hip propulsion, contact-gated swing-hip and
 clearance guidance, and upper-body feasibility regularizers. Stage I remains a
 zero-command stationary balance prior.
 
+The heavy crawl curriculum uses a physical 20 m incline, resets near its lower
+margin, and provides 40-second episodes. Forward tracking, instantaneous uphill
+speed, normalized course progress, and course completion dominate the Stage-II
+weights; balance terms remain safeguards rather than the primary objective.
+
 Hip-propulsion, downhill knee-braking, and swing-leg priors are deliberately
 absent because the present objective is stationary balance, not locomotion.
 

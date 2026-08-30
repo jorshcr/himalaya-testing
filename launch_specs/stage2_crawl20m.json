@@ -54,10 +54,16 @@
       "job_id": "6a94a45945686a1580c1958a",
       "failure": "The jobs log transport still exposed a legacy charmap, and the Hugging Face CLI emitted a Unicode completion checkmark despite UTF-8 and disabled progress bars.",
       "mitigation": "Do not use the Hugging Face CLI for checkpoint retrieval in jobs. Download the immutable artifact with authenticated retrying curl and verify its expected SHA-256 before extraction."
+    },
+    {
+      "run": "r4",
+      "job_id": "6a94a4db45686a1580c195ac",
+      "failure": "The pinned training image does not contain curl, so the CLI-free HTTP download exited 127.",
+      "mitigation": "Use the repository-owned scripts/download_checkpoint.py helper built on locked httpx; it provides authenticated retries, ASCII-only output, atomic replacement, and SHA-256 verification without external download executables."
     }
   ],
   "launch": {
-    "name": "stage2-200m-crawl20m-timebound-seed2060-r4",
+    "name": "stage2-200m-crawl20m-timebound-seed2060-r5",
     "namespace": "iteratehack",
     "flavor": "h200x4",
     "timeout": "2h",
@@ -69,7 +75,7 @@
     "checkpoint_repo": "iteratehack/himalaya-stage2-checkpoints",
     "checkpoint_interval_steps": 25000000,
     "checkpoint_download": {
-      "method": "authenticated_curl",
+      "method": "scripts/download_checkpoint.py",
       "retry_count": 5,
       "verify_sha256": "fbad689c35d0e101f795a7dcb4b714397c72b6e718dd065fc7b9e46eef7a271f"
     },

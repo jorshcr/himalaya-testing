@@ -15,7 +15,13 @@ from .audit import audit_model, render_collision_audit, write_audit
 from .config import ContactConfig, ExperimentConfig
 from .environment import FourContactBalanceEnv
 from .evaluation import evaluate, write_evaluation
-from .provenance import checkpoint_digest, finalize_training_run, write_run_manifest
+from .provenance import (
+    archive_checkpoint,
+    checkpoint_digest,
+    file_digest,
+    finalize_training_run,
+    write_run_manifest,
+)
 from .rendering import render_policy
 from .training import load_policy, train
 
@@ -30,6 +36,22 @@ def _config(args, *, sensitivity: bool = False) -> ExperimentConfig:
         slope_degrees=float(args.slope),
         implementation=getattr(args, "implementation", "jax"),
     )
+    if getattr(args, "seed", None) is not None:
+        config = replace(config, ppo=replace(config.ppo, seed=int(args.seed)))
+    randomization_scale = float(getattr(args, "reset_randomization_scale", 1.0))
+    if randomization_scale <= 0:
+        raise ValueError("reset randomization scale must be positive")
+    if randomization_scale != 1.0:
+        config = replace(
+            config,
+            reset=replace(
+                config.reset,
+                position_jitter_m=config.reset.position_jitter_m * randomization_scale,
+                yaw_jitter_degrees=config.reset.yaw_jitter_degrees * randomization_scale,
+                joint_jitter_rad=config.reset.joint_jitter_rad * randomization_scale,
+                velocity_jitter=config.reset.velocity_jitter * randomization_scale,
+            ),
+        )
     if sensitivity:
         scale = config.contact.sensitivity_scale
         config = replace(
@@ -58,6 +80,7 @@ def _train(args) -> int:
     output = Path(args.output).resolve()
     configured_timesteps = int(args.timesteps or config.ppo.timesteps_per_stage)
     completion: Path | None = None
+    uploaded_steps: set[int] = set()
     write_run_manifest(
         output,
         config,
@@ -68,6 +91,46 @@ def _train(args) -> int:
     def progress(step, metrics):
         nonlocal completion
         print(f"step={step} reward={float(metrics.get('eval/episode_reward', 0.0)):.4f}", flush=True)
+        numeric_step = int(step)
+        if numeric_step > 0 and args.hf_checkpoint_repo and numeric_step not in uploaded_steps:
+            checkpoint = output / "checkpoints" / str(numeric_step)
+            archive = archive_checkpoint(output, checkpoint)
+            metadata = archive.with_suffix(".json")
+            metadata.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "run_id": args.run_id,
+                        "stage": config.stage,
+                        "slope_degrees": config.slope_degrees,
+                        "seed": config.ppo.seed,
+                        "checkpoint_steps": numeric_step,
+                        "checkpoint_sha256": checkpoint_digest(checkpoint),
+                        "artifact_sha256": file_digest(archive),
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            from huggingface_hub import HfApi
+
+            api = HfApi()
+            prefix = f"{args.run_id}/{numeric_step}"
+            api.upload_file(
+                path_or_fileobj=archive,
+                path_in_repo=f"{prefix}/checkpoint.tar.gz",
+                repo_id=args.hf_checkpoint_repo,
+                commit_message=f"{args.run_id}: checkpoint {numeric_step}",
+            )
+            api.upload_file(
+                path_or_fileobj=metadata,
+                path_in_repo=f"{prefix}/checkpoint.json",
+                repo_id=args.hf_checkpoint_repo,
+                commit_message=f"{args.run_id}: metadata {numeric_step}",
+            )
+            uploaded_steps.add(numeric_step)
         # Brax saves the checkpoint immediately before invoking this callback.
         # Finalize here so artifacts survive runtimes that stop at trainer return.
         if int(step) >= configured_timesteps and completion is None:
@@ -159,6 +222,8 @@ def build_parser() -> argparse.ArgumentParser:
         item.add_argument("--stage", choices=STAGES, default="balance-prior")
         item.add_argument("--slope", type=float, choices=SLOPES, default=0.0)
         item.add_argument("--implementation", choices=("jax", "warp"), default="jax")
+        item.add_argument("--seed", type=int)
+        item.add_argument("--reset-randomization-scale", type=float, default=1.0)
 
     audit = sub.add_parser("audit", help="run pre-training model/reset gates")
     common(audit)
@@ -172,6 +237,11 @@ def build_parser() -> argparse.ArgumentParser:
     training.add_argument("--restore")
     training.add_argument("--timesteps", type=int)
     training.add_argument("--num-envs", type=int)
+    training.add_argument("--run-id", default="local-run")
+    training.add_argument(
+        "--hf-checkpoint-repo",
+        help="HF model repo receiving a closed archive and metadata every checkpoint",
+    )
     training.add_argument(
         "--artifact-mirror",
         help="optional second directory for the completed archive and completion.json",

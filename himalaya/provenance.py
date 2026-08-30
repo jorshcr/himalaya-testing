@@ -66,6 +66,21 @@ def checkpoint_digest(path: Path) -> str:
     return digest.hexdigest()
 
 
+def archive_checkpoint(output: Path, checkpoint: Path) -> Path:
+    """Create a closed, portable archive for one numeric checkpoint."""
+    output = output.resolve()
+    checkpoint = checkpoint.resolve()
+    artifacts = output / "artifacts"
+    artifacts.mkdir(parents=True, exist_ok=True)
+    archive = artifacts / f"checkpoint-{checkpoint.name}.tar.gz"
+    with tarfile.open(archive, "w:gz") as bundle:
+        bundle.add(checkpoint, arcname=checkpoint.relative_to(output).as_posix())
+        manifest = output / "run_manifest.json"
+        if manifest.is_file():
+            bundle.add(manifest, arcname=manifest.relative_to(output).as_posix())
+    return archive
+
+
 def runtime_contract(config: ExperimentConfig) -> dict[str, Any]:
     packages = {}
     for name in ("brax", "jax", "mujoco", "playground"):
@@ -158,12 +173,7 @@ def finalize_training_run(
             "checkpoint_relative_path": checkpoint.relative_to(output).as_posix(),
         },
     )
-    artifacts = output / "artifacts"
-    artifacts.mkdir(parents=True, exist_ok=True)
-    archive = artifacts / f"checkpoint-{checkpoint_steps}.tar.gz"
-    with tarfile.open(archive, "w:gz") as bundle:
-        bundle.add(checkpoint, arcname=checkpoint.relative_to(output).as_posix())
-        bundle.add(manifest, arcname=manifest.relative_to(output).as_posix())
+    archive = archive_checkpoint(output, checkpoint)
     archive_sha256 = file_digest(archive)
     completion = {
         "schema_version": 1,

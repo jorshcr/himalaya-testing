@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import functools
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +22,9 @@ def ppo_config(config: ExperimentConfig, *, timesteps: int | None = None):
     params = locomotion_params.brax_ppo_config("G1JoystickRoughTerrain")
     params.num_timesteps = int(timesteps or config.ppo.timesteps_per_stage)
     params.num_envs = int(config.ppo.num_envs)
-    params.num_evals = int(config.ppo.checkpoints) + 1
+    params.num_evals = (
+        math.ceil(params.num_timesteps / config.ppo.checkpoint_interval_steps) + 1
+    )
     return params
 
 

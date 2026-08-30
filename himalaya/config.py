@@ -65,7 +65,7 @@ class PPOConfig:
     timesteps_per_stage: int = 40_000_000
     num_envs: int = 8192
     seed: int = 2026
-    checkpoints: int = 5
+    checkpoint_interval_steps: int = 25_000_000
 
 
 @dataclass(frozen=True)
@@ -151,4 +151,3 @@ def to_playground_config(config: ExperimentConfig):
             scales.wrist_moment = 0.0
             scales.arm_loading = 0.0
     return cfg
-

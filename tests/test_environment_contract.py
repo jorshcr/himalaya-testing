@@ -11,6 +11,11 @@ def env() -> FourContactBalanceEnv:
     return FourContactBalanceEnv(default_config())
 
 
+@pytest.fixture(scope="module")
+def stage_two_env() -> FourContactBalanceEnv:
+    return FourContactBalanceEnv(default_config(stage="posture-adapter"))
+
+
 def test_actor_stays_upstream_and_critic_has_reserved_descriptor(env) -> None:
     state = env.reset(jax.random.PRNGKey(0))
     assert env.action_size == 29
@@ -39,3 +44,16 @@ def test_stationary_step_has_no_contact_count_or_progress_rewards(env) -> None:
     assert "com_height" in reward_metrics
     assert "action_magnitude" in reward_metrics
     assert "pose_deviation" in reward_metrics
+
+
+def test_stage_two_step_traces_time_bound_locomotion_rewards(stage_two_env) -> None:
+    state = stage_two_env.reset(jax.random.PRNGKey(2))
+    state = stage_two_env.step(state, jp.zeros(29))
+    reward_metrics = {
+        name.removeprefix("reward/")
+        for name in state.metrics
+        if name.startswith("reward/")
+    }
+    assert "tracking_forward_velocity" in reward_metrics
+    assert "progress_deficit" in reward_metrics
+    assert "stagnation" in reward_metrics

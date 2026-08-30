@@ -38,18 +38,7 @@
       }
     ]
   },
-  "status": "running",
-  "active_job": {
-    "run": "r6",
-    "job_id": "6a94a6f745686a1580c1960b",
-    "startup_gates_passed": [
-      "immutable_source_checkout",
-      "locked_dependency_sync",
-      "checkpoint_artifact_sha256",
-      "checkpoint_extraction",
-      "pinned_mujoco_menagerie_checkout"
-    ]
-  },
+  "status": "relaunching_after_reward_trace_failure",
   "launch_lessons": [
     {
       "run": "r1",
@@ -80,6 +69,12 @@
       "job_id": "6a94a62c45686a1580c195eb",
       "failure": "The downloader correctly rejected the archive because the launch supplied checkpoint_sha256, the extracted checkpoint content digest, instead of artifact_sha256, the archive file digest.",
       "mitigation": "Track checkpoint_sha256 and artifact_sha256 as distinct provenance fields. Verify downloads against checkpoint.json artifact_sha256 and the matching Hugging Face LFS SHA-256."
+    },
+    {
+      "run": "r6",
+      "job_id": "6a94a6f745686a1580c1960b",
+      "failure": "Brax initial evaluation traced the Stage-II reward and found stagnation referenced forward_velocity before its local assignment, raising UnboundLocalError before the first optimizer step.",
+      "mitigation": "Compute terrain-frame forward and lateral velocity before all time-bound locomotion rewards, and trace a real Stage-II reset/step in the environment contract tests."
     }
   ],
   "monitoring_lessons": [
@@ -89,7 +84,7 @@
     }
   ],
   "launch": {
-    "name": "stage2-200m-crawl20m-timebound-seed2060-r6",
+    "name": "stage2-200m-crawl20m-timebound-seed2060-r7",
     "namespace": "iteratehack",
     "flavor": "h200x4",
     "timeout": "2h",

@@ -406,6 +406,8 @@ class FourContactBalanceEnv(upstream_joystick.Joystick):
             self._sensor_vectors(data, "hand_torque"), axis=-1
         )
         arm_force = jp.sum(jp.abs(data.actuator_force[self._arm_actuator_ids]))
+        forward_velocity = jp.dot(com_velocity, self._ramp_tangent)
+        lateral_velocity = jp.dot(com_velocity, self._ramp_cross)
         course_target = (
             self.experiment.locomotion.course_length_m
             - 2.0 * self.experiment.locomotion.course_margin_m
@@ -433,8 +435,6 @@ class FourContactBalanceEnv(upstream_joystick.Joystick):
             )
             / self.experiment.locomotion.minimum_progress_speed_mps
         )
-        forward_velocity = jp.dot(com_velocity, self._ramp_tangent)
-        lateral_velocity = jp.dot(com_velocity, self._ramp_cross)
         foot_swing = 1.0 - foot_contact.astype(jp.float32)
         hip_power = (
             data.actuator_force[self._hip_pitch_actuator_ids]

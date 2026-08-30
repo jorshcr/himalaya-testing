@@ -5,8 +5,11 @@ from __future__ import annotations
 import argparse
 from dataclasses import replace
 import json
+import os
 from pathlib import Path
+import shutil
 import sys
+import time
 
 from .audit import audit_model, render_collision_audit, write_audit
 from .config import ContactConfig, ExperimentConfig
@@ -53,6 +56,8 @@ def _audit(args) -> int:
 def _train(args) -> int:
     config = _config(args)
     output = Path(args.output).resolve()
+    configured_timesteps = int(args.timesteps or config.ppo.timesteps_per_stage)
+    completion: Path | None = None
     write_run_manifest(
         output,
         config,
@@ -61,7 +66,28 @@ def _train(args) -> int:
     )
 
     def progress(step, metrics):
+        nonlocal completion
         print(f"step={step} reward={float(metrics.get('eval/episode_reward', 0.0)):.4f}", flush=True)
+        # Brax saves the checkpoint immediately before invoking this callback.
+        # Finalize here so artifacts survive runtimes that stop at trainer return.
+        if int(step) >= configured_timesteps and completion is None:
+            completion = finalize_training_run(
+                output,
+                config,
+                command=sys.argv,
+                configured_timesteps=configured_timesteps,
+                restore=args.restore,
+            )
+            if args.artifact_mirror:
+                mirror = Path(args.artifact_mirror).resolve()
+                mirror.mkdir(parents=True, exist_ok=True)
+                payload = json.loads(completion.read_text(encoding="utf-8"))
+                shutil.copy2(output / payload["artifact"], mirror)
+                shutil.copy2(completion, mirror)
+                if hasattr(os, "sync"):
+                    os.sync()
+                if args.artifact_flush_seconds:
+                    time.sleep(args.artifact_flush_seconds)
 
     train(
         config,
@@ -71,14 +97,14 @@ def _train(args) -> int:
         num_envs=args.num_envs,
         progress_fn=progress,
     )
-    configured_timesteps = int(args.timesteps or config.ppo.timesteps_per_stage)
-    completion = finalize_training_run(
-        output,
-        config,
-        command=sys.argv,
-        configured_timesteps=configured_timesteps,
-        restore=args.restore,
-    )
+    if completion is None:
+        completion = finalize_training_run(
+            output,
+            config,
+            command=sys.argv,
+            configured_timesteps=configured_timesteps,
+            restore=args.restore,
+        )
     print(completion, flush=True)
     return 0
 
@@ -146,6 +172,16 @@ def build_parser() -> argparse.ArgumentParser:
     training.add_argument("--restore")
     training.add_argument("--timesteps", type=int)
     training.add_argument("--num-envs", type=int)
+    training.add_argument(
+        "--artifact-mirror",
+        help="optional second directory for the completed archive and completion.json",
+    )
+    training.add_argument(
+        "--artifact-flush-seconds",
+        type=float,
+        default=0.0,
+        help="wait after mirroring so asynchronous filesystems can persist closed files",
+    )
     training.set_defaults(func=_train)
 
     evaluation = sub.add_parser("evaluate", help="run fixed-seed robust-hold evaluation")

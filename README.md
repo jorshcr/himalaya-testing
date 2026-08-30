@@ -71,6 +71,10 @@ The heavy crawl curriculum uses a physical 20 m incline, resets near its lower
 margin, and provides 40-second episodes. Forward tracking, instantaneous uphill
 speed, normalized course progress, and course completion dominate the Stage-II
 weights; balance terms remain safeguards rather than the primary objective.
+The crawl stage also imposes a time-indexed progress schedule. Policies are
+penalized both for falling behind the required course fraction and for moving
+slower than `0.20 m/s`, preventing a stable stationary solution from scoring
+well merely by surviving.
 
 Hip-propulsion, downhill knee-braking, and swing-leg priors are deliberately
 absent because the present objective is stationary balance, not locomotion.

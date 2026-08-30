@@ -227,6 +227,7 @@ class FourContactBalanceEnv(upstream_joystick.Joystick):
             last_com_velocity=jp.zeros(3),
             start_com_position=com,
             reset_drop_height_m=drop_height,
+            elapsed_steps=jp.zeros((), dtype=jp.int32),
         )
         obs = self._get_obs(data, state.info, foot_contact)
         # Brax/JAX scan carries require an invariant metrics pytree.  This
@@ -244,6 +245,7 @@ class FourContactBalanceEnv(upstream_joystick.Joystick):
         velocity = (com - next_state.info["last_com_position"]) / self.dt
         next_state.info["last_com_position"] = com
         next_state.info["last_com_velocity"] = velocity
+        next_state.info["elapsed_steps"] = state.info["elapsed_steps"] + 1
         if self.experiment.stage == "balance-prior":
             next_state.info["command"] = jp.zeros(3)
         else:
@@ -410,6 +412,27 @@ class FourContactBalanceEnv(upstream_joystick.Joystick):
         )
         course_fraction = jp.clip(longitudinal_displacement / course_target, 0.0, 1.0)
         course_complete = (longitudinal_displacement >= course_target).astype(jp.float32)
+        time_fraction = jp.clip(
+            info["elapsed_steps"] / self.experiment.locomotion.episode_length,
+            0.0,
+            1.0,
+        )
+        required_fraction = jp.maximum(
+            time_fraction
+            - self.experiment.locomotion.progress_deadline_slack_fraction,
+            0.0,
+        )
+        progress_deficit = jp.square(
+            jp.maximum(required_fraction - course_fraction, 0.0)
+        )
+        stagnation = jp.square(
+            jp.maximum(
+                self.experiment.locomotion.minimum_progress_speed_mps
+                - forward_velocity,
+                0.0,
+            )
+            / self.experiment.locomotion.minimum_progress_speed_mps
+        )
         forward_velocity = jp.dot(com_velocity, self._ramp_tangent)
         lateral_velocity = jp.dot(com_velocity, self._ramp_cross)
         foot_swing = 1.0 - foot_contact.astype(jp.float32)
@@ -512,6 +535,8 @@ class FourContactBalanceEnv(upstream_joystick.Joystick):
             ),
             "course_progress": stage_two_gate * course_fraction,
             "course_completion": stage_two_gate * course_complete,
+            "progress_deficit": stage_two_gate * progress_deficit,
+            "stagnation": stage_two_gate * stagnation,
             "lateral_velocity": stage_two_gate * jp.square(lateral_velocity),
             "yaw_rate": stage_two_gate
             * jp.square(jp.dot(data.qvel[3:6], self._ramp_normal)),

@@ -6,8 +6,15 @@
     "required_stage": "COMPLETED"
   },
   "stage1_source_selection": {
-    "manual_approval_required": true,
-    "selected_checkpoint": null,
+    "manual_approval_required": false,
+    "selected_checkpoint": {
+      "role": "selected_stage1_balance_prior",
+      "original_stage": "posture-adapter",
+      "repo_id": "iteratehack/himalaya-stage2-checkpoints",
+      "run_id": "stage2-200m-humoslope-locomotion-seed2051-r1",
+      "checkpoint_steps": 100663296,
+      "checkpoint_sha256": "fbad689c35d0e101f795a7dcb4b714397c72b6e718dd065fc7b9e46eef7a271f"
+    },
     "candidates": [
       {
         "role": "reviewed_100m_balance_prior_candidate",
@@ -28,7 +35,7 @@
       }
     ]
   },
-  "status": "prepared_not_authorized_to_launch",
+  "status": "authorized_to_launch",
   "launch": {
     "name": "stage2-200m-crawl20m-seed2060-r1",
     "namespace": "iteratehack",

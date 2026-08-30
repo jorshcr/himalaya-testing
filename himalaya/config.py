@@ -81,6 +81,8 @@ class LocomotionConfig:
     course_width_m: float = 3.0
     course_margin_m: float = 1.0
     episode_length: int = 2000
+    minimum_progress_speed_mps: float = 0.20
+    progress_deadline_slack_fraction: float = 0.10
     swing_clearance_m: float = 0.06
     swing_clearance_sigma_m: float = 0.03
     swing_hip_beta0_rad: float = -1.05
@@ -116,9 +118,11 @@ class StageIIRewardConfig:
     alive: float = 0.5
     terrain_zmp: float = 0.5
     tracking_forward_velocity: float = 8.0
-    uphill_progress: float = 5.0
-    course_progress: float = 2.0
-    course_completion: float = 10.0
+    uphill_progress: float = 6.0
+    course_progress: float = 3.0
+    course_completion: float = 15.0
+    progress_deficit: float = -8.0
+    stagnation: float = -5.0
     lateral_velocity: float = -1.0
     yaw_rate: float = -0.25
     terrain_posture: float = 0.75

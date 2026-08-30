@@ -12,7 +12,7 @@ from .audit import audit_model, render_collision_audit, write_audit
 from .config import ContactConfig, ExperimentConfig
 from .environment import FourContactBalanceEnv
 from .evaluation import evaluate, write_evaluation
-from .provenance import checkpoint_digest, write_run_manifest
+from .provenance import checkpoint_digest, finalize_training_run, write_run_manifest
 from .rendering import render_policy
 from .training import load_policy, train
 
@@ -71,6 +71,15 @@ def _train(args) -> int:
         num_envs=args.num_envs,
         progress_fn=progress,
     )
+    configured_timesteps = int(args.timesteps or config.ppo.timesteps_per_stage)
+    completion = finalize_training_run(
+        output,
+        config,
+        command=sys.argv,
+        configured_timesteps=configured_timesteps,
+        restore=args.restore,
+    )
+    print(completion, flush=True)
     return 0
 
 

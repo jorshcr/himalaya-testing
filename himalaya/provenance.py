@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import tarfile
 from typing import Any
 
 from .config import ExperimentConfig
@@ -116,4 +117,66 @@ def write_run_manifest(
     output.mkdir(parents=True, exist_ok=True)
     path = output / "run_manifest.json"
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return path
+
+
+def finalize_training_run(
+    output: Path,
+    config: ExperimentConfig,
+    *,
+    command: list[str],
+    configured_timesteps: int,
+    restore: str | None = None,
+) -> Path:
+    """Bind a completed run to its final checkpoint and portable local archive."""
+    output = output.resolve()
+    checkpoints = output / "checkpoints"
+    candidates = sorted(
+        (item for item in checkpoints.iterdir() if item.is_dir() and item.name.isdigit()),
+        key=lambda item: int(item.name),
+    )
+    if not candidates:
+        raise ValueError(f"completed training produced no checkpoints in {checkpoints}")
+    checkpoint = candidates[-1]
+    checkpoint_steps = int(checkpoint.name)
+    if checkpoint_steps < configured_timesteps:
+        raise ValueError(
+            f"final checkpoint {checkpoint_steps} is below configured "
+            f"timesteps {configured_timesteps}"
+        )
+
+    manifest = write_run_manifest(
+        output,
+        config,
+        command=command,
+        checkpoint=checkpoint,
+        extra={
+            "status": "completed",
+            "restore": restore,
+            "configured_timesteps": configured_timesteps,
+            "checkpoint_steps": checkpoint_steps,
+            "checkpoint_relative_path": checkpoint.relative_to(output).as_posix(),
+        },
+    )
+    artifacts = output / "artifacts"
+    artifacts.mkdir(parents=True, exist_ok=True)
+    archive = artifacts / f"checkpoint-{checkpoint_steps}.tar.gz"
+    with tarfile.open(archive, "w:gz") as bundle:
+        bundle.add(checkpoint, arcname=checkpoint.relative_to(output).as_posix())
+        bundle.add(manifest, arcname=manifest.relative_to(output).as_posix())
+    archive_sha256 = file_digest(archive)
+    completion = {
+        "schema_version": 1,
+        "completed": True,
+        "stage": config.stage,
+        "slope_degrees": config.slope_degrees,
+        "configured_timesteps": configured_timesteps,
+        "checkpoint_steps": checkpoint_steps,
+        "checkpoint": checkpoint.relative_to(output).as_posix(),
+        "checkpoint_sha256": checkpoint_digest(checkpoint),
+        "artifact": archive.relative_to(output).as_posix(),
+        "artifact_sha256": archive_sha256,
+    }
+    path = output / "completion.json"
+    path.write_text(json.dumps(completion, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return path

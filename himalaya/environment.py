@@ -124,16 +124,34 @@ class FourContactBalanceEnv(upstream_joystick.Joystick):
             ]
         )
         self._joint_ranges = jp.asarray(self._uppers - self._lowers)
+        self._hip_pitch_actuator_ids = jp.asarray(
+            [
+                self._mj_model.actuator(f"{side}_hip_pitch_joint").id
+                for side in ("left", "right")
+            ]
+        )
+        hip_joint_ids = self._mj_model.actuator_trnid[
+            np.asarray(self._hip_pitch_actuator_ids), 0
+        ]
+        self._hip_pitch_qpos_ids = jp.asarray(self._mj_model.jnt_qposadr[hip_joint_ids])
+        self._hip_pitch_dof_ids = jp.asarray(self._mj_model.jnt_dofadr[hip_joint_ids])
 
     def sample_command(self, rng: jax.Array) -> jax.Array:
-        del rng
-        return jp.zeros(3)
+        if self.experiment.stage == "balance-prior":
+            return jp.zeros(3)
+        speed = jax.random.uniform(
+            rng,
+            (),
+            minval=self.experiment.locomotion.forward_speed_range_mps[0],
+            maxval=self.experiment.locomotion.forward_speed_range_mps[1],
+        )
+        return jp.asarray([speed, 0.0, 0.0])
 
     def reset(self, rng: jax.Array) -> mjx_env.State:
         # Upstream initializes the exact actor/critic structures and metrics.
         state = super().reset(rng)
-        rng, pos_rng, yaw_rng, joint_rng, vel_rng, drop_rng = jax.random.split(
-            rng, 6
+        rng, pos_rng, yaw_rng, joint_rng, vel_rng, drop_rng, command_rng = jax.random.split(
+            rng, 7
         )
         qpos = self._init_q
         uv = jax.random.uniform(
@@ -189,7 +207,7 @@ class FourContactBalanceEnv(upstream_joystick.Joystick):
         com = self._com_position(data)
         state.info.update(
             rng=rng,
-            command=jp.zeros(3),
+            command=self.sample_command(command_rng),
             phase_dt=jp.zeros(1),
             last_com_position=com,
             last_com_velocity=jp.zeros(3),
@@ -212,7 +230,8 @@ class FourContactBalanceEnv(upstream_joystick.Joystick):
         velocity = (com - next_state.info["last_com_position"]) / self.dt
         next_state.info["last_com_position"] = com
         next_state.info["last_com_velocity"] = velocity
-        next_state.info["command"] = jp.zeros(3)
+        if self.experiment.stage == "balance-prior":
+            next_state.info["command"] = jp.zeros(3)
         next_state.info["phase_dt"] = jp.zeros(1)
         return self._set_diagnostics(next_state)
 
@@ -318,8 +337,12 @@ class FourContactBalanceEnv(upstream_joystick.Joystick):
         torso_z = data.xmat[self._torso_id].reshape((3, 3))[:, 2]
         orientation_error = jp.sum(jp.square(torso_z - self._ramp_tangent))
         displacement = com - info["start_com_position"]
-        drift = jp.square(jp.dot(displacement, self._ramp_tangent)) + jp.square(
-            jp.dot(displacement, self._ramp_cross)
+        longitudinal_displacement = jp.dot(displacement, self._ramp_tangent)
+        lateral_displacement = jp.dot(displacement, self._ramp_cross)
+        drift = (
+            jp.square(lateral_displacement)
+            if self.experiment.stage == "posture-adapter"
+            else jp.square(longitudinal_displacement) + jp.square(lateral_displacement)
         )
         foot_velocity = data.sensordata[self._foot_linvel_sensor_adr]
         hand_velocity = data.sensordata[self._hand_velocity_adr]
@@ -355,6 +378,43 @@ class FourContactBalanceEnv(upstream_joystick.Joystick):
             self._sensor_vectors(data, "hand_torque"), axis=-1
         )
         arm_force = jp.sum(jp.abs(data.actuator_force[self._arm_actuator_ids]))
+        forward_velocity = jp.dot(com_velocity, self._ramp_tangent)
+        lateral_velocity = jp.dot(com_velocity, self._ramp_cross)
+        foot_swing = 1.0 - foot_contact.astype(jp.float32)
+        hip_power = (
+            data.actuator_force[self._hip_pitch_actuator_ids]
+            * data.qvel[self._hip_pitch_dof_ids]
+        )
+        hip_propulsion = jp.tanh(
+            jp.sum(jp.maximum(hip_power, 0.0) * foot_contact)
+            / self.experiment.locomotion.hip_power_scale_w
+        )
+        swing_target = (
+            self.experiment.locomotion.swing_hip_beta0_rad
+            + self.experiment.locomotion.swing_hip_beta1_rad_per_rad
+            * jp.clip(
+                self._slope_radians,
+                0.0,
+                math.radians(self.experiment.locomotion.swing_hip_clip_degrees),
+            )
+        )
+        hip_guidance_each = jp.exp(
+            -jp.square(
+                (data.qpos[self._hip_pitch_qpos_ids] - swing_target)
+                / self.experiment.locomotion.swing_hip_sigma_rad
+            )
+        )
+        swing_count = jp.maximum(jp.sum(foot_swing), 1.0)
+        foot_plane_height = data.site_xpos[self._feet_site_id] @ self._ramp_normal
+        swing_clearance_each = jp.exp(
+            -jp.square(
+                (
+                    foot_plane_height
+                    - self.experiment.locomotion.swing_clearance_m
+                )
+                / self.experiment.locomotion.swing_clearance_sigma_m
+            )
+        )
         return {
             "alive": jp.ones(()),
             "terrain_zmp": zmp_reward(
@@ -404,6 +464,30 @@ class FourContactBalanceEnv(upstream_joystick.Joystick):
             ),
             "terrain_posture": stage_two_gate
             * jp.exp(-orientation_error / 0.15),
+            "tracking_forward_velocity": stage_two_gate
+            * jp.exp(
+                -jp.square(
+                    (forward_velocity - info["command"][0])
+                    / self.experiment.locomotion.tracking_sigma_mps
+                )
+            ),
+            "uphill_progress": stage_two_gate
+            * jp.clip(
+                forward_velocity
+                / self.experiment.locomotion.progress_normalizer_mps,
+                -1.0,
+                1.0,
+            ),
+            "lateral_velocity": stage_two_gate * jp.square(lateral_velocity),
+            "yaw_rate": stage_two_gate
+            * jp.square(jp.dot(data.qvel[3:6], self._ramp_normal)),
+            "hip_propulsion": stage_two_gate * hip_propulsion,
+            "swing_hip_guidance": stage_two_gate
+            * jp.sum(foot_swing * hip_guidance_each)
+            / swing_count,
+            "swing_clearance": stage_two_gate
+            * jp.sum(foot_swing * swing_clearance_each)
+            / swing_count,
             "load_balance": stage_two_gate
             * jp.exp(-jp.var(load_share) / 0.02),
             "wrist_moment": stage_two_gate

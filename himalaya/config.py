@@ -71,6 +71,22 @@ class DomainRandomizationConfig:
 
 
 @dataclass(frozen=True)
+class LocomotionConfig:
+    """Command and biomechanical priors used only by locomotion Stage II."""
+
+    forward_speed_range_mps: tuple[float, float] = (0.15, 0.60)
+    tracking_sigma_mps: float = 0.20
+    progress_normalizer_mps: float = 0.60
+    swing_clearance_m: float = 0.06
+    swing_clearance_sigma_m: float = 0.03
+    swing_hip_beta0_rad: float = -1.05
+    swing_hip_beta1_rad_per_rad: float = 0.50
+    swing_hip_clip_degrees: float = 30.0
+    swing_hip_sigma_rad: float = 0.25
+    hip_power_scale_w: float = 100.0
+
+
+@dataclass(frozen=True)
 class RewardConfig:
     alive: float = 0.5
     terrain_zmp: float = 2.0
@@ -91,16 +107,23 @@ class RewardConfig:
 
 @dataclass(frozen=True)
 class StageIIRewardConfig:
-    """Stationary adaptation of HumoSlope's descriptor-gated BSGA objective."""
+    """Locomotion adaptation of HumoSlope's descriptor-gated BSGA objective."""
 
     alive: float = 0.5
     terrain_zmp: float = 1.5
+    tracking_forward_velocity: float = 3.0
+    uphill_progress: float = 1.0
+    lateral_velocity: float = -1.0
+    yaw_rate: float = -0.25
     terrain_posture: float = 2.0
     root_height: float = 1.0
     slope_com_height: float = 3.0
     collapsed_com: float = -2.0
     load_balance: float = 0.5
-    drift: float = -4.0
+    drift: float = -2.0
+    hip_propulsion: float = 0.25
+    swing_hip_guidance: float = 0.25
+    swing_clearance: float = 0.25
     hand_slip: float = -0.75
     foot_slip: float = -0.75
     action_magnitude: float = -0.02
@@ -155,6 +178,7 @@ class ExperimentConfig:
     domain_randomization: DomainRandomizationConfig = field(
         default_factory=DomainRandomizationConfig
     )
+    locomotion: LocomotionConfig = field(default_factory=LocomotionConfig)
     reward: RewardConfig = field(default_factory=RewardConfig)
     stage2_reward: StageIIRewardConfig = field(default_factory=StageIIRewardConfig)
     ppo: PPOConfig = field(default_factory=PPOConfig)
@@ -219,6 +243,8 @@ def to_playground_config(config: ExperimentConfig):
         cfg.ang_vel_yaw = [0.0, 0.0]
         cfg.command_config.a = [0.0, 0.0, 0.0]
         cfg.command_config.b = [0.0, 0.0, 0.0]
+        if config.stage == "posture-adapter":
+            cfg.lin_vel_x = list(config.locomotion.forward_speed_range_mps)
         cfg.njmax = 192
         cfg.naconmax = 64
         scales = cfg.reward_config.scales

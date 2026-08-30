@@ -57,15 +57,15 @@ separate non-promoting sensitivity evaluation uses 80% of both values.
 
 1. `balance-prior`: zero-command balance with a four-contact,
    terrain-aligned apparent-force ZMP regularizer.
-2. `posture-adapter`: warm-start the Stage-I actor, reset the critic, and
-   activate training-only terrain descriptors plus soft CoM, torso, load, and
-   wrist/arm posture priors.
+2. `posture-adapter`: warm-start the Stage-I actor, reset the critic, and train
+   command-conditioned uphill locomotion with training-only terrain descriptors,
+   slope-conditioned posture, hip propulsion, and swing-leg guidance.
 
-The Stage-II objective follows HumoSlope's descriptor-gated structure: its
-core is a slope-conditioned CoM-height target with an explicit collapsed-CoM
-penalty, augmented by terrain-relative posture and upper-body feasibility
-regularizers. Locomotion-only BSGA hip, braking, stride, and swing guidance is
-not applied to stationary balance.
+The Stage-II objective follows HumoSlope's descriptor-gated structure. It adds
+forward-command tracking and uphill progress to a slope-conditioned CoM target,
+terrain-relative posture, stance-hip propulsion, contact-gated swing-hip and
+clearance guidance, and upper-body feasibility regularizers. Stage I remains a
+zero-command stationary balance prior.
 
 Hip-propulsion, downhill knee-braking, and swing-leg priors are deliberately
 absent because the present objective is stationary balance, not locomotion.

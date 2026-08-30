@@ -38,7 +38,21 @@
       }
     ]
   },
-  "status": "relaunching_after_reward_trace_failure",
+  "status": "running",
+  "active_job": {
+    "run": "r7",
+    "job_id": "6a94aa2e45686a1580c196a0",
+    "source_commit": "eb47957657bf767013b45ec4137862ce34d931e7",
+    "startup_gates_passed": [
+      "stage_two_reset_step_regression",
+      "immutable_source_checkout",
+      "locked_dependency_sync",
+      "checkpoint_artifact_sha256",
+      "checkpoint_extraction",
+      "pinned_mujoco_menagerie_checkout",
+      "prior_reward_trace_failure_boundary"
+    ]
+  },
   "launch_lessons": [
     {
       "run": "r1",

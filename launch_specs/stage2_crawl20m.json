@@ -38,7 +38,18 @@
       }
     ]
   },
-  "status": "relaunching_after_infrastructure_failure",
+  "status": "running",
+  "active_job": {
+    "run": "r6",
+    "job_id": "6a94a6f745686a1580c1960b",
+    "startup_gates_passed": [
+      "immutable_source_checkout",
+      "locked_dependency_sync",
+      "checkpoint_artifact_sha256",
+      "checkpoint_extraction",
+      "pinned_mujoco_menagerie_checkout"
+    ]
+  },
   "launch_lessons": [
     {
       "run": "r1",
@@ -69,6 +80,12 @@
       "job_id": "6a94a62c45686a1580c195eb",
       "failure": "The downloader correctly rejected the archive because the launch supplied checkpoint_sha256, the extracted checkpoint content digest, instead of artifact_sha256, the archive file digest.",
       "mitigation": "Track checkpoint_sha256 and artifact_sha256 as distinct provenance fields. Verify downloads against checkpoint.json artifact_sha256 and the matching Hugging Face LFS SHA-256."
+    }
+  ],
+  "monitoring_lessons": [
+    {
+      "observation": "The local Windows hf jobs logs client can fail to encode Unicode progress bars even while the remote job remains healthy.",
+      "practice": "Set local PYTHONUTF8=1 when reading logs and use the authoritative job status before classifying or relaunching a run. Never treat an observer-side rendering error as a workload failure."
     }
   ],
   "launch": {

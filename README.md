@@ -89,6 +89,9 @@ executables in the pinned image.
 The launch manifest records the extracted checkpoint-content digest separately
 from the compressed artifact digest; downloads are verified against the latter,
 as published in `checkpoint.json` and Hugging Face LFS metadata.
+On Windows, read remote job logs with local `PYTHONUTF8=1` and classify runs
+from the authoritative job status. A log-reader encoding error is an observer
+failure and must not trigger a training relaunch by itself.
 
 Hip-propulsion, downhill knee-braking, and swing-leg priors are deliberately
 absent because the present objective is stationary balance, not locomotion.

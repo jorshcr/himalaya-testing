@@ -81,6 +81,22 @@ def archive_checkpoint(output: Path, checkpoint: Path) -> Path:
     return archive
 
 
+def checkpoint_for_step(output: Path, step: int) -> Path:
+    """Resolve Brax's zero-padded checkpoint directory for an integer step."""
+    checkpoints = output.resolve() / "checkpoints"
+    match = next(
+        (
+            item
+            for item in checkpoints.iterdir()
+            if item.is_dir() and item.name.isdigit() and int(item.name) == int(step)
+        ),
+        None,
+    )
+    if match is None:
+        raise ValueError(f"checkpoint for step {step} is missing from {checkpoints}")
+    return match
+
+
 def runtime_contract(config: ExperimentConfig) -> dict[str, Any]:
     packages = {}
     for name in ("brax", "jax", "mujoco", "playground"):

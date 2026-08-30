@@ -17,6 +17,7 @@ from .environment import FourContactBalanceEnv
 from .evaluation import evaluate, write_evaluation
 from .provenance import (
     archive_checkpoint,
+    checkpoint_for_step,
     checkpoint_digest,
     file_digest,
     finalize_training_run,
@@ -94,7 +95,7 @@ def _train(args) -> int:
         print(f"step={step} reward={float(metrics.get('eval/episode_reward', 0.0)):.4f}", flush=True)
         numeric_step = int(step)
         if numeric_step > 0 and checkpoint_repo and numeric_step not in uploaded_steps:
-            checkpoint = output / "checkpoints" / str(numeric_step)
+            checkpoint = checkpoint_for_step(output, numeric_step)
             archive = archive_checkpoint(output, checkpoint)
             metadata = archive.with_suffix(".json")
             metadata.write_text(

@@ -48,8 +48,13 @@ def _nominal_data(model: mujoco.MjModel, config: ExperimentConfig) -> mujoco.MjD
 
 
 def audit_model(config: ExperimentConfig, *, settle_seconds: float = 0.25) -> AuditReport:
+    from mujoco_playground._src import mjx_env
     from mujoco_playground._src.locomotion.g1 import base, g1_constants
 
+    # A clean environment has no Menagerie checkout until explicitly
+    # materialized.  Do this before the untouched-upstream parity model is
+    # compiled, not only later when the Himalaya overlay is constructed.
+    mjx_env.ensure_menagerie_exists()
     upstream_assets = base.get_assets()
     upstream_model = mujoco.MjModel.from_xml_string(
         g1_constants.FEET_ONLY_ROUGH_TERRAIN_XML.read_text(),

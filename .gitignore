@@ -1,0 +1,11 @@
+.venv/
+.verify-venv/
+__pycache__/
+.pytest_cache/
+.test-tmp*/
+.mpl-cache/
+.tools/
+*.pyc
+runs/
+generated/
+*.mp4

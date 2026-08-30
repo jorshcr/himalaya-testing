@@ -336,8 +336,16 @@ class FourContactBalanceEnv(upstream_joystick.Joystick):
             self.experiment.reset.nominal_com_height_m,
             self._slope_radians,
             maximum_slope_radians=math.radians(30.0),
+            uphill_offset=self.experiment.reset.uphill_com_offset_m,
+            downhill_offset=self.experiment.reset.downhill_com_offset_m,
             facing_uphill=True,
         )
+        slope_intensity = jp.clip(
+            jp.abs(self._slope_radians) / math.radians(30.0), 0.0, 1.0
+        )
+        stage_two_gate = jp.asarray(
+            self.experiment.stage == "posture-adapter", dtype=jp.float32
+        ) * slope_intensity
         height = jp.dot(com, self._ramp_normal)
         masked_forces = jp.where(active_contacts, forces, 0.0)
         load_share = masked_forces / (jp.sum(masked_forces) + 1.0e-6)
@@ -377,9 +385,30 @@ class FourContactBalanceEnv(upstream_joystick.Joystick):
                     / self.experiment.reset.com_height_sigma_m
                 )
             ),
-            "load_balance": jp.exp(-jp.var(load_share) / 0.02),
-            "wrist_moment": jp.sum(jp.square(wrist_moment / 25.0)),
-            "arm_loading": arm_force / 1000.0,
+            "slope_com_height": stage_two_gate
+            * jp.exp(
+                -jp.square(
+                    (height - target_height)
+                    / self.experiment.reset.com_height_sigma_m
+                )
+            ),
+            "collapsed_com": stage_two_gate
+            * jp.square(
+                jp.maximum(
+                    target_height
+                    - self.experiment.reset.collapsed_com_margin_m
+                    - height,
+                    0.0,
+                )
+                / self.experiment.reset.com_height_sigma_m
+            ),
+            "terrain_posture": stage_two_gate
+            * jp.exp(-orientation_error / 0.15),
+            "load_balance": stage_two_gate
+            * jp.exp(-jp.var(load_share) / 0.02),
+            "wrist_moment": stage_two_gate
+            * jp.sum(jp.square(wrist_moment / 25.0)),
+            "arm_loading": stage_two_gate * arm_force / 1000.0,
         }
 
     def _get_termination(self, data: mjx.Data) -> jax.Array:

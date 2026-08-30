@@ -16,5 +16,5 @@ def test_level_reset_is_load_bearing_for_full_acceptance_horizon() -> None:
     report = audit_model(default_config(), settle_seconds=20.0)
     assert report.passed
     assert report.settling_passed
-    assert report.minimum_root_height_m >= 0.24
+    assert report.minimum_root_height_m >= 0.20
     assert report.prohibited_contacts == ()

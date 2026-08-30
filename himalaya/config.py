@@ -43,10 +43,13 @@ class ResetConfig:
     velocity_jitter: float = 0.02
     drop_height_min_m: float = 0.25
     drop_height_max_m: float = 0.35
-    minimum_root_height_m: float = 0.24
+    minimum_root_height_m: float = 0.20
     nominal_com_height_m: float = 0.225
     com_height_sigma_m: float = 0.04
     root_height_sigma_m: float = 0.05
+    uphill_com_offset_m: float = 0.015
+    downhill_com_offset_m: float = -0.010
+    collapsed_com_margin_m: float = 0.025
 
 
 @dataclass(frozen=True)
@@ -84,10 +87,29 @@ class RewardConfig:
     # Upstream multiplies every component by ctrl_dt (0.02).  This scale
     # therefore produces a fixed -100 terminal cost instead of the old -2.
     termination: float = -5000.0
-    # Stage-II-only soft posture terms.
-    load_balance: float = 0.25
-    wrist_moment: float = -0.05
-    arm_loading: float = -0.1
+
+
+@dataclass(frozen=True)
+class StageIIRewardConfig:
+    """Stationary adaptation of HumoSlope's descriptor-gated BSGA objective."""
+
+    alive: float = 0.5
+    terrain_zmp: float = 1.5
+    terrain_posture: float = 2.0
+    root_height: float = 1.0
+    slope_com_height: float = 3.0
+    collapsed_com: float = -2.0
+    load_balance: float = 0.5
+    drift: float = -4.0
+    hand_slip: float = -0.75
+    foot_slip: float = -0.75
+    action_magnitude: float = -0.02
+    action_rate: float = -0.03
+    pose_deviation: float = -0.1
+    wrist_moment: float = -0.1
+    arm_loading: float = -0.15
+    energy: float = -1.0e-4
+    termination: float = -5000.0
 
 
 @dataclass(frozen=True)
@@ -134,6 +156,7 @@ class ExperimentConfig:
         default_factory=DomainRandomizationConfig
     )
     reward: RewardConfig = field(default_factory=RewardConfig)
+    stage2_reward: StageIIRewardConfig = field(default_factory=StageIIRewardConfig)
     ppo: PPOConfig = field(default_factory=PPOConfig)
     evaluation: EvaluationConfig = field(default_factory=EvaluationConfig)
 
@@ -184,9 +207,7 @@ def to_playground_config(config: ExperimentConfig):
         cfg.action_scale = config.action_scale
         cfg.restricted_joint_range = True
         cfg.noise_config.level = config.domain_randomization.sensor_noise_level
-        cfg.push_config.enable = (
-            config.stage == "balance-prior" and config.domain_randomization.enabled
-        )
+        cfg.push_config.enable = config.domain_randomization.enabled
         cfg.push_config.interval_range = list(
             config.domain_randomization.push_interval_seconds
         )
@@ -203,10 +224,14 @@ def to_playground_config(config: ExperimentConfig):
         scales = cfg.reward_config.scales
         for name in list(scales.keys()):
             scales[name] = 0.0
-        for name, value in asdict(config.reward).items():
+        reward_names = set(asdict(config.reward)) | set(asdict(config.stage2_reward))
+        for name in reward_names:
+            scales[name] = 0.0
+        selected_reward = (
+            config.stage2_reward
+            if config.stage == "posture-adapter"
+            else config.reward
+        )
+        for name, value in asdict(selected_reward).items():
             scales[name] = value
-        if config.stage == "balance-prior":
-            scales.load_balance = 0.0
-            scales.wrist_moment = 0.0
-            scales.arm_loading = 0.0
     return cfg

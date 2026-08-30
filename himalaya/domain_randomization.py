@@ -8,7 +8,13 @@ import jax.numpy as jp
 from .config import ExperimentConfig
 
 
-def make_domain_randomizer(env, config: ExperimentConfig, num_envs: int):
+def make_domain_randomizer(
+    env,
+    config: ExperimentConfig,
+    num_envs: int,
+    *,
+    slope_degrees: tuple[float, ...] | None = None,
+):
     """Build a deterministic, stratified multi-slope MJX randomizer.
 
     Tilted gravity over a level local support plane is the rigid-frame
@@ -19,7 +25,7 @@ def make_domain_randomizer(env, config: ExperimentConfig, num_envs: int):
     settings = config.domain_randomization
     rng = jax.random.PRNGKey(config.ppo.seed + 17_029)
     keys = jax.random.split(rng, num_envs)
-    choices = jp.asarray(settings.slope_degrees)
+    choices = jp.asarray(slope_degrees or settings.slope_degrees)
     slope_indices = jax.random.permutation(rng, jp.arange(num_envs)) % choices.size
     slopes = choices[slope_indices]
     hand_pairs = jp.asarray(

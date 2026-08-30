@@ -43,6 +43,7 @@ def train(
     restore: Path | None = None,
     timesteps: int | None = None,
     num_envs: int | None = None,
+    allow_unpromoted_restore: bool = False,
     progress_fn=lambda *_: None,
 ):
     expected_restore_slope: float | None = None
@@ -58,7 +59,9 @@ def train(
             f"{config.stage} at {config.slope_degrees:g} degrees requires a "
             f"promoted {expected_restore_slope:g}-degree checkpoint"
         )
-    if restore is not None:
+    if allow_unpromoted_restore and config.stage != "posture-adapter":
+        raise ValueError("unpromoted restores are only allowed for posture-adapter")
+    if restore is not None and not allow_unpromoted_restore:
         validate_restore(
             restore,
             expected_stage="balance-prior",
@@ -84,8 +87,14 @@ def train(
     del kwargs["network_factory"]
     output.mkdir(parents=True, exist_ok=True)
     randomization_fn = None
-    if config.stage == "balance-prior" and config.domain_randomization.enabled:
-        randomization_fn = make_domain_randomizer(env, config, int(params.num_envs))
+    if config.domain_randomization.enabled:
+        # Stage I spans equivalent inclines on the reference plane. Stage II
+        # trains on the actual configured 30-degree terrain, so its dynamics
+        # randomizer keeps gravity world-vertical and varies the other fields.
+        slopes = None if config.stage == "balance-prior" else (0.0,)
+        randomization_fn = make_domain_randomizer(
+            env, config, int(params.num_envs), slope_degrees=slopes
+        )
     return ppo.train(
         environment=env,
         eval_env=env,

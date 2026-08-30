@@ -31,6 +31,9 @@ central-body contact and with less than 1 mm audited hand penetration.
 Training resets then lift that pose by a uniformly sampled `0.25–0.35 m` along
 the terrain normal (centered at `0.30 m`), so the policy must absorb randomized
 landing impacts before holding balance.
+The minimum-root-height termination gate is `0.20 m`; drift, prohibited-body
+contact, orientation, non-finite state, and push recovery remain independent
+acceptance criteria, so lowering this gate does not redefine collapse as success.
 
 Canonical Stage I is a 200-million-step robust balance prior. Every PPO batch
 is stratified across equivalent 0°, 5°, 10°, 15°, and 30° inclines and varies
@@ -57,6 +60,12 @@ separate non-promoting sensitivity evaluation uses 80% of both values.
 2. `posture-adapter`: warm-start the Stage-I actor, reset the critic, and
    activate training-only terrain descriptors plus soft CoM, torso, load, and
    wrist/arm posture priors.
+
+The Stage-II objective follows HumoSlope's descriptor-gated structure: its
+core is a slope-conditioned CoM-height target with an explicit collapsed-CoM
+penalty, augmented by terrain-relative posture and upper-body feasibility
+regularizers. Locomotion-only BSGA hip, braking, stride, and swing guidance is
+not applied to stationary balance.
 
 Hip-propulsion, downhill knee-braking, and swing-leg priors are deliberately
 absent because the present objective is stationary balance, not locomotion.

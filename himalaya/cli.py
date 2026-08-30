@@ -111,7 +111,11 @@ def _train(args) -> int:
         output,
         config,
         command=sys.argv,
-        extra={"status": "training", "restore": args.restore},
+        extra={
+            "status": "training",
+            "restore": args.restore,
+            "allow_unpromoted_restore": args.allow_unpromoted_restore,
+        },
     )
 
     def progress(step, metrics):
@@ -184,6 +188,7 @@ def _train(args) -> int:
         restore=Path(args.restore).resolve() if args.restore else None,
         timesteps=args.timesteps,
         num_envs=args.num_envs,
+        allow_unpromoted_restore=args.allow_unpromoted_restore,
         progress_fn=progress,
     )
     if completion is None:
@@ -263,6 +268,11 @@ def build_parser() -> argparse.ArgumentParser:
     common(training)
     training.add_argument("--output", required=True)
     training.add_argument("--restore")
+    training.add_argument(
+        "--allow-unpromoted-restore",
+        action="store_true",
+        help="experimental Stage-II warm start that remains non-promoting",
+    )
     training.add_argument("--timesteps", type=int)
     training.add_argument("--num-envs", type=int)
     training.add_argument("--run-id", default="local-run")

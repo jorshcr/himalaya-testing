@@ -37,6 +37,7 @@ def test_actor_and_scientific_intent_are_stationary() -> None:
 
 def test_drop_height_bounds_are_canonical_and_validated() -> None:
     config = default_config()
+    assert config.reset.minimum_root_height_m == 0.20
     assert config.reset.drop_height_min_m == 0.25
     assert config.reset.drop_height_max_m == 0.35
     with pytest.raises(ValueError, match="maximum drop height"):

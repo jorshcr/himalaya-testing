@@ -51,12 +51,7 @@ def train(
     allow_unpromoted_restore: bool = False,
     progress_fn=lambda *_: None,
 ):
-    expected_restore_slope: float | None = None
-    if config.stage == "posture-adapter":
-        expected_restore_slope = 30.0
-    elif config.slope_degrees > 0:
-        index = config.curriculum_degrees.index(config.slope_degrees)
-        expected_restore_slope = config.curriculum_degrees[index - 1]
+    expected_restore_stage, expected_restore_slope = expected_restore_contract(config)
     if expected_restore_slope is None and restore is not None:
         raise ValueError("level balance-prior must start without a restore")
     if expected_restore_slope is not None and restore is None:
@@ -69,7 +64,7 @@ def train(
     if restore is not None and not allow_unpromoted_restore:
         validate_restore(
             restore,
-            expected_stage="balance-prior",
+            expected_stage=expected_restore_stage,
             expected_slope=expected_restore_slope,
         )
     env = FourContactBalanceEnv(config)
@@ -94,8 +89,8 @@ def train(
     randomization_fn = None
     if config.domain_randomization.enabled:
         # Stage I spans equivalent inclines on the reference plane. Stage II
-        # trains on the actual configured 30-degree terrain, so its dynamics
-        # randomizer keeps gravity world-vertical and varies the other fields.
+        # trains on the actual configured incline, so its dynamics randomizer
+        # keeps gravity world-vertical and varies the other fields.
         slopes = None if config.stage == "balance-prior" else (0.0,)
         randomization_fn = make_domain_randomizer(
             env, config, int(params.num_envs), slope_degrees=slopes
@@ -113,13 +108,32 @@ def train(
         ),
         save_checkpoint_path=str(output / "checkpoints"),
         restore_checkpoint_path=str(restore) if restore else None,
-        # HumoSlope Stage II keeps the actor and resets the expanded critic.
-        restore_value_fn=config.stage != "posture-adapter",
+        # HumoSlope Stage II resets the critic only at the initial level-ground
+        # adapter.  Later slope promotions keep actor and critic continuity.
+        restore_value_fn=not (
+            config.stage == "posture-adapter" and config.slope_degrees == 0.0
+        ),
         num_eval_envs=min(int(params.num_envs), 4) if smoke_run else 128,
         seed=config.ppo.seed,
         progress_fn=progress_fn,
         **kwargs,
     )
+
+
+def expected_restore_contract(
+    config: ExperimentConfig,
+) -> tuple[str, float | None]:
+    """Return the only checkpoint stage/slope accepted by the curriculum."""
+
+    if config.stage == "posture-adapter":
+        if config.slope_degrees == 0.0:
+            return "balance-prior", 30.0
+        index = config.wave_gait.curriculum_degrees.index(config.slope_degrees)
+        return "posture-adapter", config.wave_gait.curriculum_degrees[index - 1]
+    if config.slope_degrees > 0:
+        index = config.curriculum_degrees.index(config.slope_degrees)
+        return "balance-prior", config.curriculum_degrees[index - 1]
+    return "balance-prior", None
 
 
 def validate_restore(

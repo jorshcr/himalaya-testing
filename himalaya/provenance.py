@@ -130,8 +130,17 @@ def write_run_manifest(
     payload: dict[str, Any] = {
         "schema_version": 1,
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
-        "objective": "stationary four-contact slope balance",
+        "objective": (
+            "soft phase-guided four-limb slope crawling"
+            if config.stage == "posture-adapter"
+            else "stationary four-contact slope balance"
+        ),
         "humo_slope_inspired_not_reproduction": True,
+        "wave_gait_sequence": (
+            list(config.wave_gait.sequence)
+            if config.stage == "posture-adapter"
+            else None
+        ),
         "simulation_only": True,
         "microspike_coefficients_uncalibrated": True,
         "config": config.as_dict(),

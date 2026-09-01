@@ -28,7 +28,7 @@ from .training import load_policy, train
 
 
 STAGES = ("balance-prior", "posture-adapter")
-SLOPES = (0.0, 5.0, 10.0, 15.0, 30.0)
+SLOPES = (0.0, 5.0, 10.0, 15.0, 20.0, 30.0)
 
 
 def _config(args, *, sensitivity: bool = False) -> ExperimentConfig:
@@ -239,8 +239,20 @@ def _evaluate(args) -> int:
 
 def _render(args) -> int:
     config = _config(args)
-    policy = load_policy(config, Path(args.checkpoint).resolve())
+    checkpoint = Path(args.checkpoint).resolve()
+    policy = load_policy(config, checkpoint)
     path = render_policy(config, policy, Path(args.output), seconds=args.seconds)
+    write_run_manifest(
+        path.parent,
+        config,
+        command=sys.argv,
+        checkpoint=checkpoint,
+        extra={
+            "render": str(path),
+            "render_seconds_requested": float(args.seconds),
+            "visible_contacts": True,
+        },
+    )
     print(path)
     return 0
 

@@ -74,22 +74,107 @@ class DomainRandomizationConfig:
 class LocomotionConfig:
     """Command and biomechanical priors used only by locomotion Stage II."""
 
-    forward_speed_range_mps: tuple[float, float] = (0.30, 0.80)
     tracking_sigma_mps: float = 0.20
     progress_normalizer_mps: float = 0.80
     course_length_m: float = 20.0
     course_width_m: float = 3.0
     course_margin_m: float = 1.0
     episode_length: int = 2000
-    minimum_progress_speed_mps: float = 0.20
     progress_deadline_slack_fraction: float = 0.10
-    swing_clearance_m: float = 0.06
-    swing_clearance_sigma_m: float = 0.03
     swing_hip_beta0_rad: float = -1.05
     swing_hip_beta1_rad_per_rad: float = 0.50
     swing_hip_clip_degrees: float = 30.0
     swing_hip_sigma_rad: float = 0.25
     hip_power_scale_w: float = 100.0
+
+
+@dataclass(frozen=True)
+class WaveGaitConfig:
+    """Soft four-limb crawl clock and promotion curriculum.
+
+    The clock activates the four phase values already present in the upstream
+    actor observation.  It never adds actor or critic inputs.
+    """
+
+    enabled: bool = True
+    sequence: tuple[str, ...] = (
+        "left_hand",
+        "right_foot",
+        "right_hand",
+        "left_foot",
+    )
+    curriculum_degrees: tuple[float, ...] = (0.0, 5.0, 10.0, 15.0, 20.0, 30.0)
+    bootstrap_degrees: tuple[float, ...] = (0.0, 5.0)
+    cycle_frequency_hz: float = 0.50
+    swing_window_fraction: float = 0.24
+    landing_start_fraction: float = 0.65
+    swing_clearance_m: float = 0.055
+    swing_clearance_sigma_m: float = 0.025
+    forward_placement_target_m: float = 0.10
+    forward_placement_sigma_m: float = 0.06
+    minimum_recontact_advance_m: float = 0.025
+    stance_velocity_sigma_mps: float = 0.08
+    shoulder_pitch_beta0_rad: float = -0.45
+    shoulder_pitch_beta1_rad_per_rad: float = 0.35
+    shoulder_pitch_sigma_rad: float = 0.25
+    bootstrap_randomization_fraction: float = 0.02
+    bootstrap_sensor_noise_level: float = 0.05
+    bootstrap_reset_jitter_scale: float = 0.10
+    bootstrap_drop_height_m: float = 0.0
+    no_progress_seconds: float = 2.0
+    no_progress_delta_m: float = 0.04
+    minimum_progress_speed_fraction: float = 0.50
+    minimum_progress_speed_floor_mps: float = 0.04
+    command_speed_ranges_mps: tuple[tuple[float, float, float], ...] = (
+        (0.0, 0.08, 0.25),
+        (5.0, 0.08, 0.25),
+        (10.0, 0.10, 0.30),
+        (15.0, 0.12, 0.35),
+        (20.0, 0.14, 0.40),
+        (30.0, 0.16, 0.45),
+    )
+    # Phase guidance is deliberately strongest during bootstrap and anneals as
+    # the terrain curriculum becomes harder, leaving the gait soft at 30 deg.
+    reward_scales_by_slope: tuple[tuple[float, float], ...] = (
+        (0.0, 1.00),
+        (5.0, 0.90),
+        (10.0, 0.75),
+        (15.0, 0.60),
+        (20.0, 0.45),
+        (30.0, 0.30),
+    )
+    minimum_promotion_progress_m: tuple[tuple[float, float], ...] = (
+        (0.0, 0.50),
+        (5.0, 0.75),
+        (10.0, 1.00),
+        (15.0, 1.50),
+        (20.0, 2.00),
+        (30.0, 3.00),
+    )
+
+    def is_bootstrap(self, slope_degrees: float) -> bool:
+        return float(slope_degrees) in self.bootstrap_degrees
+
+    def command_range(self, slope_degrees: float) -> tuple[float, float]:
+        slope = float(slope_degrees)
+        for level, minimum, maximum in self.command_speed_ranges_mps:
+            if level == slope:
+                return minimum, maximum
+        raise ValueError(f"missing wave-gait command range for {slope:g} degrees")
+
+    def reward_scale(self, slope_degrees: float) -> float:
+        slope = float(slope_degrees)
+        for level, scale in self.reward_scales_by_slope:
+            if level == slope:
+                return scale
+        raise ValueError(f"missing wave-gait reward scale for {slope:g} degrees")
+
+    def promotion_progress(self, slope_degrees: float) -> float:
+        slope = float(slope_degrees)
+        for level, progress in self.minimum_promotion_progress_m:
+            if level == slope:
+                return progress
+        raise ValueError(f"missing wave-gait promotion gate for {slope:g} degrees")
 
 
 @dataclass(frozen=True)
@@ -133,7 +218,14 @@ class StageIIRewardConfig:
     drift: float = -1.5
     hip_propulsion: float = 0.5
     swing_hip_guidance: float = 0.5
-    swing_clearance: float = 0.5
+    swing_shoulder_guidance: float = 0.5
+    wave_swing_clearance: float = 1.5
+    wave_forward_placement: float = 1.25
+    wave_recontact_ahead: float = 2.0
+    wave_stance_stability: float = 1.0
+    wave_backward_placement: float = -1.0
+    wave_missed_swing_window: float = -1.5
+    wave_stance_slip: float = -1.0
     hand_slip: float = -0.25
     foot_slip: float = -0.25
     action_magnitude: float = -0.02
@@ -178,7 +270,7 @@ class ExperimentConfig:
 
     stage: Literal["balance-prior", "posture-adapter"] = "balance-prior"
     slope_degrees: float = 0.0
-    curriculum_degrees: tuple[float, ...] = (0.0, 5.0, 10.0, 15.0, 30.0)
+    curriculum_degrees: tuple[float, ...] = (0.0, 5.0, 10.0, 15.0, 20.0, 30.0)
     implementation: Literal["jax", "warp"] = "jax"
     action_scale: float = 0.25
     episode_length: int = 1000
@@ -189,6 +281,7 @@ class ExperimentConfig:
         default_factory=DomainRandomizationConfig
     )
     locomotion: LocomotionConfig = field(default_factory=LocomotionConfig)
+    wave_gait: WaveGaitConfig = field(default_factory=WaveGaitConfig)
     reward: RewardConfig = field(default_factory=RewardConfig)
     stage2_reward: StageIIRewardConfig = field(default_factory=StageIIRewardConfig)
     ppo: PPOConfig = field(default_factory=PPOConfig)
@@ -216,6 +309,39 @@ class ExperimentConfig:
             raise ValueError("domain-randomized slopes must use the reviewed curriculum")
         if not 0 < self.evaluation.minimum_success_rate <= 1:
             raise ValueError("minimum success rate must be in (0, 1]")
+        if self.wave_gait.sequence != (
+            "left_hand",
+            "right_foot",
+            "right_hand",
+            "left_foot",
+        ):
+            raise ValueError("wave-gait sequence must be LH, RF, RH, LF")
+        if self.wave_gait.curriculum_degrees != self.curriculum_degrees:
+            raise ValueError("wave-gait and experiment curricula must match")
+        if not 0 < self.wave_gait.swing_window_fraction <= 0.25:
+            raise ValueError("wave-gait swing window must be in (0, 0.25]")
+        if not 0 < self.wave_gait.landing_start_fraction < 1:
+            raise ValueError("wave-gait landing fraction must be in (0, 1)")
+        if self.wave_gait.cycle_frequency_hz <= 0:
+            raise ValueError("wave-gait cycle frequency must be positive")
+        if self.wave_gait.no_progress_seconds <= 0:
+            raise ValueError("no-progress truncation window must be positive")
+        if self.wave_gait.no_progress_delta_m <= 0:
+            raise ValueError("no-progress delta must be positive")
+        if not 0 <= self.wave_gait.bootstrap_randomization_fraction < 1:
+            raise ValueError("bootstrap randomization fraction must be in [0, 1)")
+        if self.wave_gait.minimum_progress_speed_floor_mps <= 0:
+            raise ValueError("minimum progress speed floor must be positive")
+        if not 0 < self.wave_gait.minimum_progress_speed_fraction <= 1:
+            raise ValueError("minimum progress speed fraction must be in (0, 1]")
+        for slope in self.curriculum_degrees:
+            minimum, maximum = self.wave_gait.command_range(slope)
+            if not 0 <= minimum <= maximum:
+                raise ValueError("wave-gait command ranges must be ordered")
+            if not 0 <= self.wave_gait.reward_scale(slope) <= 1:
+                raise ValueError("wave-gait reward scale must be in [0, 1]")
+            if self.wave_gait.promotion_progress(slope) <= 0:
+                raise ValueError("wave-gait promotion progress must be positive")
 
     def as_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -244,8 +370,16 @@ def to_playground_config(config: ExperimentConfig):
         )
         cfg.action_scale = config.action_scale
         cfg.restricted_joint_range = True
-        cfg.noise_config.level = config.domain_randomization.sensor_noise_level
-        cfg.push_config.enable = config.domain_randomization.enabled
+        bootstrap = (
+            config.stage == "posture-adapter"
+            and config.wave_gait.is_bootstrap(config.slope_degrees)
+        )
+        cfg.noise_config.level = (
+            config.wave_gait.bootstrap_sensor_noise_level
+            if bootstrap
+            else config.domain_randomization.sensor_noise_level
+        )
+        cfg.push_config.enable = config.domain_randomization.enabled and not bootstrap
         cfg.push_config.interval_range = list(
             config.domain_randomization.push_interval_seconds
         )
@@ -258,7 +392,7 @@ def to_playground_config(config: ExperimentConfig):
         cfg.command_config.a = [0.0, 0.0, 0.0]
         cfg.command_config.b = [0.0, 0.0, 0.0]
         if config.stage == "posture-adapter":
-            cfg.lin_vel_x = list(config.locomotion.forward_speed_range_mps)
+            cfg.lin_vel_x = list(config.wave_gait.command_range(config.slope_degrees))
         cfg.njmax = 192
         cfg.naconmax = 64
         scales = cfg.reward_config.scales

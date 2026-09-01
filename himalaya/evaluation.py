@@ -24,6 +24,9 @@ class EvaluationReport:
     nonfinite_trials: int
     recovered_from_push: int
     mean_final_drift_m: float
+    mean_forward_progress_m: float
+    required_forward_progress_m: float
+    no_progress_truncations: int
     peak_hand_force_n: float
     peak_wrist_moment_nm: float
     promotion_passed: bool
@@ -56,11 +59,17 @@ def evaluate(
     peak_hand = jp.zeros(trials)
     peak_wrist = jp.zeros(trials)
     final_drift = jp.zeros(trials)
+    final_progress = jp.zeros(trials)
+    no_progress_truncations = jp.zeros(trials, dtype=bool)
     steps = round(config.evaluation.duration_seconds / env.dt)
     push_step = round(config.evaluation.push_time_seconds / env.dt)
     recovery_deadline = push_step + round(config.evaluation.recovery_seconds / env.dt)
     for index in range(steps):
-        if index == push_step:
+        bootstrap = (
+            config.stage == "posture-adapter"
+            and config.wave_gait.is_bootstrap(config.slope_degrees)
+        )
+        if index == push_step and not bootstrap:
             qvel = state.data.qvel.at[:, 1].add(
                 config.evaluation.push_delta_velocity_mps
             )
@@ -73,10 +82,13 @@ def evaluate(
         done = state.done > 0.5
         prohibited = metrics["validation/prohibited_body_contact"] > 0.5
         bad_number = metrics["validation/nonfinite"] > 0.5
+        no_progress = metrics["validation/no_progress_truncation"] > 0.5
         failed |= active & (done | prohibited)
         nonfinite |= active & bad_number
         active &= ~(done | prohibited | bad_number)
         final_drift = metrics["validation/drift_m"]
+        final_progress = metrics["validation/progress_m"]
+        no_progress_truncations |= no_progress
         peak_hand = jp.maximum(peak_hand, metrics["validation/peak_hand_force_n"])
         peak_wrist = jp.maximum(peak_wrist, metrics["validation/peak_wrist_moment_nm"])
         if push_step < index <= recovery_deadline:
@@ -84,13 +96,36 @@ def evaluate(
                 (final_drift <= config.evaluation.maximum_drift_m)
                 & (metrics["validation/speed_mps"] <= 0.10)
             )
-    success = (
-        active
-        & recovered
-        & (final_drift <= config.evaluation.maximum_drift_m)
-        & ~nonfinite
+    required_progress = (
+        config.wave_gait.promotion_progress(config.slope_degrees)
+        if config.stage == "posture-adapter"
+        else 0.0
     )
-    success, failed, nonfinite, recovered, final_drift, peak_hand, peak_wrist = (
+    if config.stage == "posture-adapter":
+        success = (
+            active
+            & (final_progress >= required_progress)
+            & (final_drift <= config.evaluation.maximum_drift_m)
+            & ~nonfinite
+        )
+    else:
+        success = (
+            active
+            & recovered
+            & (final_drift <= config.evaluation.maximum_drift_m)
+            & ~nonfinite
+        )
+    (
+        success,
+        failed,
+        nonfinite,
+        recovered,
+        final_drift,
+        final_progress,
+        no_progress_truncations,
+        peak_hand,
+        peak_wrist,
+    ) = (
         np.asarray(value)
         for value in (
             success,
@@ -98,6 +133,8 @@ def evaluate(
             nonfinite,
             recovered,
             final_drift,
+            final_progress,
+            no_progress_truncations,
             peak_hand,
             peak_wrist,
         )
@@ -111,6 +148,9 @@ def evaluate(
         nonfinite_trials=int(np.sum(nonfinite)),
         recovered_from_push=int(np.sum(recovered)),
         mean_final_drift_m=float(np.mean(final_drift)),
+        mean_forward_progress_m=float(np.mean(final_progress)),
+        required_forward_progress_m=float(required_progress),
+        no_progress_truncations=int(np.sum(no_progress_truncations)),
         peak_hand_force_n=float(np.max(peak_hand)),
         peak_wrist_moment_nm=float(np.max(peak_wrist)),
         promotion_passed=rate >= config.evaluation.minimum_success_rate,

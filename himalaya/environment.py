@@ -24,6 +24,7 @@ from .physics import (
     terrain_descriptor,
     zmp_reward,
 )
+from .wave_gait import update_no_progress, wave_gait_gates, wave_reward_terms
 
 
 class FourContactBalanceEnv(upstream_joystick.Joystick):
@@ -140,15 +141,30 @@ class FourContactBalanceEnv(upstream_joystick.Joystick):
         ]
         self._hip_pitch_qpos_ids = jp.asarray(self._mj_model.jnt_qposadr[hip_joint_ids])
         self._hip_pitch_dof_ids = jp.asarray(self._mj_model.jnt_dofadr[hip_joint_ids])
+        self._shoulder_pitch_actuator_ids = jp.asarray(
+            [
+                self._mj_model.actuator(f"{side}_shoulder_pitch_joint").id
+                for side in ("left", "right")
+            ]
+        )
+        shoulder_joint_ids = self._mj_model.actuator_trnid[
+            np.asarray(self._shoulder_pitch_actuator_ids), 0
+        ]
+        self._shoulder_pitch_qpos_ids = jp.asarray(
+            self._mj_model.jnt_qposadr[shoulder_joint_ids]
+        )
 
     def sample_command(self, rng: jax.Array) -> jax.Array:
         if self.experiment.stage == "balance-prior":
             return jp.zeros(3)
+        minimum, maximum = self.experiment.wave_gait.command_range(
+            self.experiment.slope_degrees
+        )
         speed = jax.random.uniform(
             rng,
             (),
-            minval=self.experiment.locomotion.forward_speed_range_mps[0],
-            maxval=self.experiment.locomotion.forward_speed_range_mps[1],
+            minval=minimum,
+            maxval=maximum,
         )
         return jp.asarray([speed, 0.0, 0.0])
 
@@ -159,11 +175,22 @@ class FourContactBalanceEnv(upstream_joystick.Joystick):
             rng, 7
         )
         qpos = self._init_q
+        bootstrap = (
+            self.experiment.stage == "posture-adapter"
+            and self.experiment.wave_gait.is_bootstrap(
+                self.experiment.slope_degrees
+            )
+        )
+        reset_scale = (
+            self.experiment.wave_gait.bootstrap_reset_jitter_scale
+            if bootstrap
+            else 1.0
+        )
         uv = jax.random.uniform(
             pos_rng,
             (2,),
-            minval=-self.experiment.reset.position_jitter_m,
-            maxval=self.experiment.reset.position_jitter_m,
+            minval=-self.experiment.reset.position_jitter_m * reset_scale,
+            maxval=self.experiment.reset.position_jitter_m * reset_scale,
         )
         course_start = (
             -self.experiment.locomotion.course_length_m / 2.0
@@ -175,11 +202,18 @@ class FourContactBalanceEnv(upstream_joystick.Joystick):
             (course_start + uv[0]) * self._ramp_tangent
             + uv[1] * self._ramp_cross
         )
+        drop_minimum = (
+            self.experiment.wave_gait.bootstrap_drop_height_m
+            if bootstrap
+            else self.experiment.reset.drop_height_min_m
+        )
+        drop_maximum = (
+            self.experiment.wave_gait.bootstrap_drop_height_m
+            if bootstrap
+            else self.experiment.reset.drop_height_max_m
+        )
         drop_height = jax.random.uniform(
-            drop_rng,
-            (),
-            minval=self.experiment.reset.drop_height_min_m,
-            maxval=self.experiment.reset.drop_height_max_m,
+            drop_rng, (), minval=drop_minimum, maxval=drop_maximum
         )
         qpos = qpos.at[:3].set(
             plane_point
@@ -188,13 +222,15 @@ class FourContactBalanceEnv(upstream_joystick.Joystick):
         joint_noise = jax.random.uniform(
             joint_rng,
             (29,),
-            minval=-self.experiment.reset.joint_jitter_rad,
-            maxval=self.experiment.reset.joint_jitter_rad,
+            minval=-self.experiment.reset.joint_jitter_rad * reset_scale,
+            maxval=self.experiment.reset.joint_jitter_rad * reset_scale,
         )
         qpos = qpos.at[7:].set(
             jp.clip(self._reference_pose + joint_noise, self._lowers, self._uppers)
         )
-        limit = math.radians(self.experiment.reset.yaw_jitter_degrees)
+        limit = math.radians(
+            self.experiment.reset.yaw_jitter_degrees * reset_scale
+        )
         yaw = jax.random.uniform(yaw_rng, (), minval=-limit, maxval=limit)
         from mujoco.mjx._src import math as mjx_math
 
@@ -204,8 +240,8 @@ class FourContactBalanceEnv(upstream_joystick.Joystick):
         qvel = jax.random.uniform(
             vel_rng,
             (self.mjx_model.nv,),
-            minval=-self.experiment.reset.velocity_jitter,
-            maxval=self.experiment.reset.velocity_jitter,
+            minval=-self.experiment.reset.velocity_jitter * reset_scale,
+            maxval=self.experiment.reset.velocity_jitter * reset_scale,
         )
         data = mjx_env.make_data(
             self.mj_model,
@@ -219,27 +255,55 @@ class FourContactBalanceEnv(upstream_joystick.Joystick):
         data = mjx.forward(self.mjx_model, data)
         foot_contact = self._foot_contacts(data)
         com = self._com_position(data)
+        wave_contact = self._wave_limb_contacts(data)
+        wave_positions = self._wave_limb_positions(data)
+        phase = (
+            jp.asarray([0.0, jp.pi / 2.0])
+            if self.experiment.stage == "posture-adapter"
+            else state.info["phase"]
+        )
+        phase_dt = (
+            jp.asarray(
+                [
+                    2.0
+                    * jp.pi
+                    * self.dt
+                    * self.experiment.wave_gait.cycle_frequency_hz
+                ]
+            )
+            if self.experiment.stage == "posture-adapter"
+            else jp.zeros(1)
+        )
         state.info.update(
             rng=rng,
             command=self.sample_command(command_rng),
-            phase_dt=jp.zeros(1),
+            phase=phase,
+            phase_dt=phase_dt,
             last_com_position=com,
             last_com_velocity=jp.zeros(3),
             start_com_position=com,
             reset_drop_height_m=drop_height,
             elapsed_steps=jp.zeros((), dtype=jp.int32),
+            wave_previous_contact_positions=wave_positions,
+            wave_last_contact=wave_contact,
+            wave_progress_anchor_m=jp.zeros(()),
+            wave_stalled_steps=jp.zeros((), dtype=jp.int32),
         )
         obs = self._get_obs(data, state.info, foot_contact)
         # Brax/JAX scan carries require an invariant metrics pytree.  This
         # diagnostic is populated by ``_get_reward`` on the first step, so it
         # must also exist in the reset state.
         state.metrics["validation/zmp_deviation_m"] = jp.zeros(())
+        state.metrics["validation/no_progress_truncation"] = jp.zeros(())
+        state.metrics["validation/wave_active_limb_index"] = jp.zeros(())
         state = state.replace(
             data=data, obs=obs, reward=jp.zeros(()), done=jp.zeros(())
         )
         return self._set_diagnostics(state)
 
     def step(self, state: mjx_env.State, action: jax.Array) -> mjx_env.State:
+        previous_wave_contact = state.info["wave_last_contact"]
+        previous_wave_positions = state.info["wave_previous_contact_positions"]
         next_state = super().step(state, action)
         com = self._com_position(next_state.data)
         velocity = (com - next_state.info["last_com_position"]) / self.dt
@@ -248,6 +312,7 @@ class FourContactBalanceEnv(upstream_joystick.Joystick):
         next_state.info["elapsed_steps"] = state.info["elapsed_steps"] + 1
         if self.experiment.stage == "balance-prior":
             next_state.info["command"] = jp.zeros(3)
+            no_progress_truncation = jp.zeros((), dtype=bool)
         else:
             displacement = com - next_state.info["start_com_position"]
             progress = jp.dot(displacement, self._ramp_tangent)
@@ -260,7 +325,35 @@ class FourContactBalanceEnv(upstream_joystick.Joystick):
                 jp.zeros(3),
                 next_state.info["command"],
             )
-        next_state.info["phase_dt"] = jp.zeros(1)
+            progress_anchor, stalled_steps, no_progress_truncation = (
+                update_no_progress(
+                    progress,
+                    next_state.info["wave_progress_anchor_m"],
+                    next_state.info["wave_stalled_steps"],
+                    minimum_delta_m=self.experiment.wave_gait.no_progress_delta_m,
+                    maximum_stalled_steps=round(
+                        self.experiment.wave_gait.no_progress_seconds / self.dt
+                    ),
+                )
+            )
+            no_progress_truncation &= progress < course_target
+            next_state.info["wave_progress_anchor_m"] = progress_anchor
+            next_state.info["wave_stalled_steps"] = stalled_steps
+        wave_contact = self._wave_limb_contacts(next_state.data)
+        wave_positions = self._wave_limb_positions(next_state.data)
+        first_wave_contact = wave_contact & ~previous_wave_contact
+        next_state.info["wave_previous_contact_positions"] = jp.where(
+            first_wave_contact[:, None], wave_positions, previous_wave_positions
+        )
+        next_state.info["wave_last_contact"] = wave_contact
+        next_state.metrics["validation/no_progress_truncation"] = (
+            no_progress_truncation.astype(jp.float32)
+        )
+        next_state = next_state.replace(
+            done=jp.maximum(
+                next_state.done, no_progress_truncation.astype(next_state.done.dtype)
+            )
+        )
         return self._set_diagnostics(next_state)
 
     def _foot_contacts(self, data: mjx.Data) -> jax.Array:
@@ -278,6 +371,21 @@ class FourContactBalanceEnv(upstream_joystick.Joystick):
                 for sensor_id in self._hand_sensor_ids
             ]
         )
+
+    def _wave_limb_contacts(self, data: mjx.Data) -> jax.Array:
+        feet = self._foot_contacts(data)
+        hands = self._hand_contacts(data)
+        return jp.asarray([hands[0], feet[1], hands[1], feet[0]])
+
+    def _wave_limb_positions(self, data: mjx.Data) -> jax.Array:
+        feet = data.site_xpos[self._feet_site_id]
+        hands = data.site_xpos[self._hands_site_id]
+        return jp.stack([hands[0], feet[1], hands[1], feet[0]])
+
+    def _wave_limb_velocities(self, data: mjx.Data) -> jax.Array:
+        feet = data.sensordata[self._foot_linvel_sensor_adr]
+        hands = data.sensordata[self._hand_velocity_adr]
+        return jp.stack([hands[0], feet[1], hands[1], feet[0]])
 
     def _sensor_vectors(self, data: mjx.Data, suffix: str) -> jax.Array:
         return jp.stack(
@@ -391,12 +499,12 @@ class FourContactBalanceEnv(upstream_joystick.Joystick):
             downhill_offset=self.experiment.reset.downhill_com_offset_m,
             facing_uphill=True,
         )
-        slope_intensity = jp.clip(
-            jp.abs(self._slope_radians) / math.radians(30.0), 0.0, 1.0
-        )
         stage_two_gate = jp.asarray(
             self.experiment.stage == "posture-adapter", dtype=jp.float32
-        ) * slope_intensity
+        )
+        wave_guidance_gate = stage_two_gate * self.experiment.wave_gait.reward_scale(
+            self.experiment.slope_degrees
+        )
         height = jp.dot(com, self._ramp_normal)
         masked_forces = jp.where(active_contacts, forces, 0.0)
         load_share = masked_forces / (jp.sum(masked_forces) + 1.0e-6)
@@ -427,15 +535,44 @@ class FourContactBalanceEnv(upstream_joystick.Joystick):
         progress_deficit = jp.square(
             jp.maximum(required_fraction - course_fraction, 0.0)
         )
+        minimum_progress_speed = jp.maximum(
+            self.experiment.wave_gait.minimum_progress_speed_floor_mps,
+            info["command"][0]
+            * self.experiment.wave_gait.minimum_progress_speed_fraction,
+        )
         stagnation = jp.square(
             jp.maximum(
-                self.experiment.locomotion.minimum_progress_speed_mps
-                - forward_velocity,
+                minimum_progress_speed - forward_velocity,
                 0.0,
             )
-            / self.experiment.locomotion.minimum_progress_speed_mps
+            / minimum_progress_speed
         )
-        foot_swing = 1.0 - foot_contact.astype(jp.float32)
+        wave_positions = self._wave_limb_positions(data)
+        wave_velocities = self._wave_limb_velocities(data)
+        wave_contacts = self._wave_limb_contacts(data)
+        wave_forces = jp.asarray(
+            [hands_force[0], feet_force[1], hands_force[1], feet_force[0]]
+        )
+        wave_terms = wave_reward_terms(
+            positions=wave_positions,
+            velocities=wave_velocities,
+            contacts=wave_contacts,
+            normal_forces=wave_forces,
+            previous_contact_positions=info["wave_previous_contact_positions"],
+            previous_contacts=info["wave_last_contact"],
+            tangent=self._ramp_tangent,
+            normal=self._ramp_normal,
+            phase_radians=info["phase"][0],
+            config=self.experiment.wave_gait,
+        )
+        metrics["validation/wave_active_limb_index"] = wave_terms[
+            "wave_active_limb_index"
+        ]
+        wave_swing, _, _, _ = wave_gait_gates(
+            info["phase"][0], self.experiment.wave_gait
+        )
+        foot_phase_gate = jp.asarray([wave_swing[3], wave_swing[1]])
+        hand_phase_gate = jp.asarray([wave_swing[0], wave_swing[2]])
         hip_power = (
             data.actuator_force[self._hip_pitch_actuator_ids]
             * data.qvel[self._hip_pitch_dof_ids]
@@ -459,15 +596,15 @@ class FourContactBalanceEnv(upstream_joystick.Joystick):
                 / self.experiment.locomotion.swing_hip_sigma_rad
             )
         )
-        swing_count = jp.maximum(jp.sum(foot_swing), 1.0)
-        foot_plane_height = data.site_xpos[self._feet_site_id] @ self._ramp_normal
-        swing_clearance_each = jp.exp(
+        shoulder_target = (
+            self.experiment.wave_gait.shoulder_pitch_beta0_rad
+            + self.experiment.wave_gait.shoulder_pitch_beta1_rad_per_rad
+            * jp.clip(self._slope_radians, 0.0, math.radians(30.0))
+        )
+        shoulder_guidance_each = jp.exp(
             -jp.square(
-                (
-                    foot_plane_height
-                    - self.experiment.locomotion.swing_clearance_m
-                )
-                / self.experiment.locomotion.swing_clearance_sigma_m
+                (data.qpos[self._shoulder_pitch_qpos_ids] - shoulder_target)
+                / self.experiment.wave_gait.shoulder_pitch_sigma_rad
             )
         )
         return {
@@ -541,12 +678,26 @@ class FourContactBalanceEnv(upstream_joystick.Joystick):
             "yaw_rate": stage_two_gate
             * jp.square(jp.dot(data.qvel[3:6], self._ramp_normal)),
             "hip_propulsion": stage_two_gate * hip_propulsion,
-            "swing_hip_guidance": stage_two_gate
-            * jp.sum(foot_swing * hip_guidance_each)
-            / swing_count,
-            "swing_clearance": stage_two_gate
-            * jp.sum(foot_swing * swing_clearance_each)
-            / swing_count,
+            "swing_hip_guidance": wave_guidance_gate
+            * jp.sum(foot_phase_gate * hip_guidance_each)
+            / (jp.sum(foot_phase_gate) + 1.0e-6),
+            "swing_shoulder_guidance": wave_guidance_gate
+            * jp.sum(hand_phase_gate * shoulder_guidance_each)
+            / (jp.sum(hand_phase_gate) + 1.0e-6),
+            "wave_swing_clearance": wave_guidance_gate
+            * wave_terms["wave_swing_clearance"],
+            "wave_forward_placement": wave_guidance_gate
+            * wave_terms["wave_forward_placement"],
+            "wave_recontact_ahead": wave_guidance_gate
+            * wave_terms["wave_recontact_ahead"],
+            "wave_stance_stability": wave_guidance_gate
+            * wave_terms["wave_stance_stability"],
+            "wave_backward_placement": wave_guidance_gate
+            * wave_terms["wave_backward_placement"],
+            "wave_missed_swing_window": wave_guidance_gate
+            * wave_terms["wave_missed_swing_window"],
+            "wave_stance_slip": wave_guidance_gate
+            * wave_terms["wave_stance_slip"],
             "load_balance": stage_two_gate
             * jp.exp(-jp.var(load_share) / 0.02),
             "wrist_moment": stage_two_gate
@@ -574,15 +725,15 @@ class FourContactBalanceEnv(upstream_joystick.Joystick):
         foot_contact = self._foot_contacts(data)
         com = self._com_position(data)
         displacement = com - state.info["start_com_position"]
-        drift = jp.linalg.norm(
-            jp.asarray(
-                [
-                    jp.dot(displacement, self._ramp_tangent),
-                    jp.dot(displacement, self._ramp_cross),
-                ]
-            )
+        progress = jp.dot(displacement, self._ramp_tangent)
+        lateral_drift = jp.abs(jp.dot(displacement, self._ramp_cross))
+        drift = jp.where(
+            self.experiment.stage == "posture-adapter",
+            lateral_drift,
+            jp.sqrt(jp.square(progress) + jp.square(lateral_drift)),
         )
         state.metrics["validation/drift_m"] = drift
+        state.metrics["validation/progress_m"] = progress
         state.metrics["validation/com_height_m"] = jp.dot(com, self._ramp_normal)
         state.metrics["validation/speed_mps"] = jp.linalg.norm(data.qvel[:2])
         state.metrics["validation/hand_contact_ratio"] = jp.mean(

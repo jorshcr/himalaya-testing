@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "status": "awaiting_user_review",
+  "training_launch_authorized": false,
+  "source_checkpoint": {
+    "role": "user_selected_stage1_balance_actor",
+    "original_stage": "posture-adapter",
+    "repo_id": "iteratehack/himalaya-stage2-checkpoints",
+    "run_id": "stage2-200m-humoslope-locomotion-seed2051-r1",
+    "checkpoint_steps": 100663296,
+    "checkpoint_sha256": "fbad689c35d0e101f795a7dcb4b714397c72b6e718dd065fc7b9e46eef7a271f",
+    "artifact_sha256": "36cee4dcc815c861483f442756ab8d866abef4995f28ea693850941df06c3427",
+    "initial_restore_policy": "restore_actor_reset_critic",
+    "provenance_override_required": true
+  },
+  "wave_gait": {
+    "sequence": [
+      "left_hand",
+      "right_foot",
+      "right_hand",
+      "left_foot"
+    ],
+    "actor_observation_abi": 103,
+    "critic_observation_abi": 233,
+    "new_observation_fields": 0,
+    "bootstrap_slopes_degrees": [0.0, 5.0],
+    "bootstrap_command_range_mps": [0.08, 0.25],
+    "bootstrap_drop_height_m": 0.0,
+    "bootstrap_pushes": false,
+    "bootstrap_randomization_fraction": 0.02,
+    "no_progress_truncation_seconds": 2.0,
+    "curriculum_degrees": [0.0, 5.0, 10.0, 15.0, 20.0, 30.0]
+  },
+  "promotion": {
+    "requires_completed_evaluation": true,
+    "requires_measurable_forward_progress": true,
+    "predecessor_degrees": {
+      "5": 0.0,
+      "10": 5.0,
+      "15": 10.0,
+      "20": 15.0,
+      "30": 20.0
+    },
+    "minimum_progress_m": {
+      "0": 0.5,
+      "5": 0.75,
+      "10": 1.0,
+      "15": 1.5,
+      "20": 2.0,
+      "30": 3.0
+    }
+  },
+  "checkpointing": {
+    "repo_id": "iteratehack/himalaya-stage2-checkpoints",
+    "interval_steps": 25000000,
+    "verify_content_and_artifact_sha256": true
+  },
+  "launch": {
+    "namespace": "iteratehack",
+    "flavor": null,
+    "timeout": null,
+    "timesteps": null,
+    "run_id": null,
+    "blocked_reason": "Explicit user review is required before any training launch."
+  }
+}

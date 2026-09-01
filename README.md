@@ -1,14 +1,14 @@
-# Himalaya G1 stationary four-contact balance
+# Himalaya G1 balance and soft wave-gait crawling
 
 This is the canonical, simulation-only Himalaya repository. It trains the
-29-DOF Unitree G1 to hold a nominal all-fours posture on rough slopes while
-recovering from bounded pushes.
+29-DOF Unitree G1 first to hold a nominal all-fours posture on rough slopes,
+then to crawl uphill with a soft four-limb wave rhythm.
 
 The project uses the two-stage insight from
 [HumoSlope](https://arxiv.org/html/2607.07830v1), but it is **not a HumoSlope
 reproduction**. HumoSlope studies bipedal locomotion in Isaac Lab. This project
 adapts its terrain-aligned balance prior and training-only posture conditioning
-to stationary multi-contact balance in MuJoCo Playground.
+to multi-contact balance and crawling in MuJoCo Playground.
 
 ## Verified foundation
 
@@ -28,7 +28,7 @@ position-actuator target. Its arms place the elbows and palms ahead/outboard
 rather than folding the forearms toward the robot center. On level terrain the
 zero-action reset passes a 20-second native MuJoCo settling gate without
 central-body contact and with less than 1 mm audited hand penetration.
-Training resets then lift that pose by a uniformly sampled `0.25–0.35 m` along
+Stage-I training resets lift that pose by a uniformly sampled `0.25–0.35 m` along
 the terrain normal (centered at `0.30 m`), so the policy must absorb randomized
 landing impacts before holding balance.
 The minimum-root-height termination gate is `0.20 m`; drift, prohibited-body
@@ -59,13 +59,28 @@ separate non-promoting sensitivity evaluation uses 80% of both values.
    terrain-aligned apparent-force ZMP regularizer.
 2. `posture-adapter`: warm-start the Stage-I actor, reset the critic, and train
    command-conditioned uphill locomotion with training-only terrain descriptors,
-   slope-conditioned posture, hip propulsion, and swing-leg guidance.
+   slope-conditioned posture, hip/shoulder guidance, and a soft wave-gait clock.
 
 The Stage-II objective follows HumoSlope's descriptor-gated structure. It adds
 forward-command tracking and uphill progress to a slope-conditioned CoM target,
-terrain-relative posture, stance-hip propulsion, contact-gated swing-hip and
+terrain-relative posture, stance-hip propulsion, phase-gated hip/shoulder and
 clearance guidance, and upper-body feasibility regularizers. Stage I remains a
 zero-command stationary balance prior.
+
+Stage II activates the four phase values already reserved at the end of the
+upstream 103-value actor observation; it adds no observation fields and keeps
+the 233-value critic ABI. The clock follows `left hand → right foot → right
+hand → left foot`, with a single soft swing window at a time. It rewards swing
+clearance, forward placement, recontact ahead of the prior support, and quiet
+loaded stance limbs. Backward placement, missed windows, and stance slip are
+penalized. These are annealed preferences, not exact contact-count rewards,
+binary gait constraints, or survival conditions.
+
+The 0° and 5° bootstrap levels command `0.08–0.25 m/s`, use zero drop height,
+disable pushes, reduce reset jitter to 10% of nominal, narrow dynamics
+randomization to ±2%, and truncate an episode after two seconds without at
+least 4 cm of new progress. Phase guidance then anneals from `1.0` at 0° to
+`0.3` at 30°.
 
 The heavy crawl curriculum uses a physical 20 m incline, resets near its lower
 margin, and provides 40-second episodes. Forward tracking, instantaneous uphill
@@ -73,8 +88,8 @@ speed, normalized course progress, and course completion dominate the Stage-II
 weights; balance terms remain safeguards rather than the primary objective.
 The crawl stage also imposes a time-indexed progress schedule. Policies are
 penalized both for falling behind the required course fraction and for moving
-slower than `0.20 m/s`, preventing a stable stationary solution from scoring
-well merely by surviving.
+slower than half of the sampled command (with a `0.04 m/s` floor), preventing
+a stable stationary solution from scoring well merely by surviving.
 
 GPU launch hygiene is part of the reproducible run specification. Container
 commands must follow the jobs CLI `--` argument separator, and remote Python/HF
@@ -93,12 +108,11 @@ On Windows, read remote job logs with local `PYTHONUTF8=1` and classify runs
 from the authoritative job status. A log-reader encoding error is an observer
 failure and must not trigger a training relaunch by itself.
 
-Hip-propulsion, downhill knee-braking, and swing-leg priors are deliberately
-absent because the present objective is stationary balance, not locomotion.
-
-Curriculum: `0° → 5° → 10° → 15° → 30°`. Each stage must pass audit,
-compiled smoke, quantitative evaluation, and reviewed video gates before the
-next stage or larger compute budget.
+Curriculum: `0° → 5° → 10° → 15° → 20° → 30°`. The initial 0° adapter
+restores the Stage-I actor and resets its critic. Every later level restores the
+promoted actor and critic from the immediately preceding slope. Promotion
+requires survival plus measurable forward crawling (`0.5, 0.75, 1.0, 1.5,
+2.0, 3.0 m` respectively), audit, quantitative evaluation, and reviewed video.
 
 ## Commands
 
@@ -127,12 +141,16 @@ himalaya train --stage balance-prior --slope 0 --output runs/smoke `
   --timesteps 2048 --num-envs 8
 ```
 
-Stage II requires a promoted Stage-I checkpoint:
+Stage II begins on level terrain from the reviewed Stage-I actor:
 
 ```powershell
-himalaya train --stage posture-adapter --slope 30 `
+himalaya train --stage posture-adapter --slope 0 `
   --restore runs/stage1-30/checkpoints/40000000 `
-  --output runs/stage2-30
+  --output runs/stage2-wave-0
+
+himalaya evaluate --stage posture-adapter --slope 0 `
+  --checkpoint runs/stage2-wave-0/checkpoints/40000000 `
+  --output runs/stage2-wave-0/evaluation.json
 ```
 
 ## Evidence boundaries
@@ -142,6 +160,9 @@ himalaya train --stage posture-adapter --slope 30 `
 - A video is qualitative evidence, not a promotion result.
 - Simulation evidence is not physical feasibility or safety evidence.
 
-Final promotion requires at least 90% of 64 fixed trials to survive 20 seconds,
-remain within the configured terrain-frame drift bound, avoid prohibited body
-contact and non-finite state, and recover from the deterministic push.
+Balance promotion requires at least 90% of 64 fixed trials to survive 20
+seconds, remain within the terrain-frame drift bound, avoid prohibited body
+contact and non-finite state, and recover from the deterministic push. Crawl
+promotion replaces stationary push recovery with the configured forward
+distance gate while retaining survival, lateral drift, prohibited-contact, and
+finite-state requirements.

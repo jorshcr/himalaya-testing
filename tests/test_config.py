@@ -7,6 +7,7 @@ from himalaya.config import (
     PLAYGROUND_REVISION,
     ExperimentConfig,
     default_config,
+    to_playground_config,
 )
 
 
@@ -20,17 +21,18 @@ def test_canonical_upstream_and_microspikes() -> None:
 
 
 def test_only_reviewed_curriculum_is_accepted() -> None:
+    assert ExperimentConfig(slope_degrees=20.0).slope_degrees == 20.0
     assert ExperimentConfig(slope_degrees=30.0).slope_degrees == 30.0
     with pytest.raises(ValueError, match="slope must be one of"):
         ExperimentConfig(slope_degrees=35.0)
 
 
-def test_actor_and_scientific_intent_are_stationary() -> None:
+def test_stage_one_disables_locomotion_rewards() -> None:
     config = default_config()
-    payload = config.as_dict()
-    text = repr(payload).lower()
-    assert "uphill_progress" not in text
-    assert "four_contact_reward" not in text
+    scales = to_playground_config(config).reward_config.scales
+    assert scales.uphill_progress == 0.0
+    assert scales.wave_swing_clearance == 0.0
+    assert "four_contact_reward" not in scales
     assert config.stage == "balance-prior"
     assert config.reward.termination * 0.02 == -100.0
 
